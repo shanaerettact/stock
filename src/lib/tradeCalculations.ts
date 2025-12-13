@@ -1,0 +1,195 @@
+/**
+ * 股票交易計算函式庫
+ * 包含手續費、交易稅、損益等所有自動計算邏輯
+ */
+
+// ===== 常數定義 =====
+const COMMISSION_RATE = 0.001425; // 0.1425%
+const COMMISSION_DISCOUNT = 0.6; // 六折
+const TAX_RATE = 0.003; // 0.3%（僅賣出）
+const SHARES_PER_LOT = 1000; // 台股一張 = 1000 股
+
+// ===== 型別定義 =====
+export type TradeUnit = 'SHARES' | 'LOTS'; // 零股 | 張
+
+export interface TradeInput {
+  price: number; // 成交價格（每股）
+  quantity: number; // 數量（依據 unit 而定）
+  unit: TradeUnit; // 單位：零股(SHARES) 或 張(LOTS)
+  tradeType: 'BUY' | 'SELL';
+}
+
+export interface TradeCalculation {
+  amount: number; // 成交金額
+  commission: number; // 手續費
+  tax: number; // 交易稅
+  totalCost: number; // 總成本（買入）或淨收入（賣出）
+  totalShares: number; // 總股數
+}
+
+export interface PositionPnL {
+  totalPnL: number; // 總損益
+  returnRate: number; // 報酬率 (%)
+  rValue: number | null; // R 值
+  holdingDays: number; // 持有天數
+}
+
+// ===== 單筆交易計算 =====
+
+/**
+ * 將數量轉換為股數
+ * @param quantity 數量
+ * @param unit 單位（零股或張）
+ * @returns 總股數
+ */
+export function convertToShares(quantity: number, unit: TradeUnit): number {
+  return unit === 'LOTS' ? quantity * SHARES_PER_LOT : quantity;
+}
+
+/**
+ * 計算成交金額
+ * @param price 每股價格
+ * @param quantity 數量
+ * @param unit 單位（零股或張）
+ * @returns 成交金額 = price × 總股數
+ */
+export function calculateAmount(price: number, quantity: number, unit: TradeUnit = 'LOTS'): number {
+  const totalShares = convertToShares(quantity, unit);
+  return price * totalShares;
+}
+
+/**
+ * 計算手續費（買賣都有）
+ * @param amount 成交金額
+ * @returns 手續費 = amount × 0.1425% × 0.6
+ */
+export function calculateCommission(amount: number): number {
+  const commission = amount * COMMISSION_RATE * COMMISSION_DISCOUNT;
+  // 手續費最低 20 元（台股規則，可選）
+  return Math.max(commission, 20);
+}
+
+/**
+ * 計算交易稅（僅賣出）
+ * @param amount 成交金額
+ * @param tradeType 交易類型
+ * @returns 交易稅 = amount × 0.3%（賣出時）
+ */
+export function calculateTax(amount: number, tradeType: 'BUY' | 'SELL'): number {
+  if (tradeType === 'SELL') {
+    return amount * TAX_RATE;
+  }
+  return 0;
+}
+
+/**
+ * 計算單筆交易所有費用
+ * @param input 交易輸入資料
+ * @returns 完整計算結果
+ */
+export function calculateTrade(input: TradeInput): TradeCalculation {
+  const totalShares = convertToShares(input.quantity, input.unit);
+  const amount = calculateAmount(input.price, input.quantity, input.unit);
+  const commission = calculateCommission(amount);
+  const tax = calculateTax(amount, input.tradeType);
+  
+  // 買入：總成本 = 成交金額 + 手續費
+  // 賣出：淨收入 = 成交金額 - 手續費 - 交易稅
+  const totalCost = input.tradeType === 'BUY'
+    ? amount + commission
+    : amount - commission - tax;
+  
+  return {
+    amount,
+    commission,
+    tax,
+    totalCost,
+    totalShares,
+  };
+}
+
+// ===== 部位損益計算 =====
+
+export interface Trade {
+  tradeType: 'BUY' | 'SELL';
+  amount: number;
+  commission: number;
+  tax: number;
+  totalCost: number;
+  tradeDate: Date;
+}
+
+/**
+ * 計算部位損益（一組買賣交易）
+ * @param trades 屬於該部位的所有交易
+ * @param entryDate 開倉日期
+ * @param exitDate 平倉日期
+ * @param plannedStopLoss 預計停損金額（用於計算 R 值）
+ * @returns 部位績效指標
+ */
+export function calculatePositionPnL(
+  trades: Trade[],
+  entryDate: Date,
+  exitDate: Date | null,
+  plannedStopLoss?: number
+): PositionPnL | null {
+  if (!exitDate) {
+    // 尚未平倉，無法計算損益
+    return null;
+  }
+  
+  // 計算總投入與總回收
+  let totalBuyCost = 0;
+  let totalSellRevenue = 0;
+  
+  trades.forEach(trade => {
+    if (trade.tradeType === 'BUY') {
+      totalBuyCost += trade.totalCost; // 買入總成本（含手續費）
+    } else {
+      totalSellRevenue += trade.totalCost; // 賣出淨收入（已扣手續費和稅）
+    }
+  });
+  
+  // 總損益 = 賣出淨收入 - 買入總成本
+  const totalPnL = totalSellRevenue - totalBuyCost;
+  
+  // 報酬率 = (損益 / 投入成本) × 100%
+  const returnRate = totalBuyCost > 0 ? (totalPnL / totalBuyCost) * 100 : 0;
+  
+  // R 值 = 實際損益 / 預計停損金額
+  const rValue = plannedStopLoss && plannedStopLoss > 0
+    ? totalPnL / plannedStopLoss
+    : null;
+  
+  // 持有天數
+  const holdingDays = Math.ceil(
+    (exitDate.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24)
+  );
+  
+  return {
+    totalPnL,
+    returnRate,
+    rValue,
+    holdingDays,
+  };
+}
+
+// ===== 平均買入/賣出價計算 =====
+
+export interface PriceQuantity {
+  price: number;
+  quantity: number;
+}
+
+/**
+ * 計算加權平均價格
+ * @param trades 價格與數量陣列
+ * @returns 加權平均價格
+ */
+export function calculateWeightedAvgPrice(trades: PriceQuantity[]): number {
+  const totalAmount = trades.reduce((sum, t) => sum + t.price * t.quantity, 0);
+  const totalQuantity = trades.reduce((sum, t) => sum + t.quantity, 0);
+  
+  return totalQuantity > 0 ? totalAmount / totalQuantity : 0;
+}
+

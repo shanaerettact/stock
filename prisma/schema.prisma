@@ -1,0 +1,155 @@
+// Prisma Schema for Stock Trading Statistics System
+// 股票交易統計系統資料庫結構
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 帳戶資金管理
+model Account {
+  id                String    @id @default(cuid())
+  userId            String    @unique // 預留多使用者功能
+  initialCapital    Float     // 初始資金
+  currentBalance    Float     // 當前餘額
+  currency          String    @default("TWD") // 幣別
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  trades            Trade[]
+  positions         Position[]
+  
+  @@map("accounts")
+}
+
+// 交易記錄（單筆買/賣）
+model Trade {
+  id                String    @id @default(cuid())
+  accountId         String
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  // 基本資訊
+  stockCode         String    // 股票代號
+  stockName         String?   // 股票名稱
+  tradeType         String    // BUY / SELL
+  tradeDate         DateTime  // 交易日期
+  
+  // 價格與數量
+  price             Float     // 成交價格（每股）
+  quantity          Int       // 數量（依據 unit 而定）
+  unit              String    @default("SHARES") // 單位：SHARES(零股) / LOTS(張)
+  
+  // 自動計算欄位
+  amount            Float     // 成交金額 = price × quantity × 1000
+  commission        Float     // 手續費（0.1425% × 0.6）
+  tax               Float     @default(0) // 交易稅（賣出時 0.3%）
+  totalCost         Float     // 總成本 = amount + commission + tax
+  
+  // 關聯部位
+  positionId        String?
+  position          Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@index([accountId])
+  @@index([stockCode])
+  @@index([tradeDate])
+  @@index([positionId])
+  @@map("trades")
+}
+
+// 部位（一組成對的買賣交易）
+model Position {
+  id                String       @id @default(cuid())
+  accountId         String
+  account           Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  stockCode         String       // 股票代號
+  stockName         String?      // 股票名稱
+  
+  // 部位狀態
+  status            String       @default("OPEN") // OPEN / CLOSED
+  
+  // 開倉資訊
+  entryDate         DateTime     // 開倉日期（首次買進）
+  avgEntryPrice     Float        // 平均買入價
+  totalQuantity     Int          // 總股數
+  
+  // 平倉資訊
+  exitDate          DateTime?    // 平倉日期（完全賣出）
+  avgExitPrice      Float?       // 平均賣出價
+  
+  // 風險管理
+  plannedStopLoss   Float?       // 預計停損金額（Risk Amount）
+  maxDrawdown       Float?       // 該部位最大回撤
+  
+  // 績效指標（平倉時計算）
+  totalPnL          Float?       // 總損益（已扣除所有費用）
+  returnRate        Float?       // 報酬率 (%)
+  rValue            Float?       // R 值 = 實際損益 ÷ 預計停損金額
+  holdingDays       Int?         // 持有天數
+  
+  // 成本明細
+  totalInvested     Float        // 總投入成本
+  totalCommission   Float        @default(0) // 總手續費
+  totalTax          Float        @default(0) // 總交易稅
+  
+  trades            Trade[]
+  
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@index([accountId])
+  @@index([stockCode])
+  @@index([status])
+  @@index([entryDate])
+  @@map("positions")
+}
+
+// 每月統計（可選：用於快取計算結果）
+model MonthlyStats {
+  id                String    @id @default(cuid())
+  accountId         String
+  
+  year              Int
+  month             Int
+  
+  // 交易統計
+  totalTrades       Int       // 總交易次數（部位數）
+  winningTrades     Int       // 獲利次數
+  losingTrades      Int       // 虧損次數
+  winRate           Float     // 勝率
+  
+  // 損益統計
+  totalPnL          Float     // 總損益
+  avgWin            Float     // 平均獲利
+  avgLoss           Float     // 平均虧損
+  maxWin            Float     // 最大獲利
+  maxLoss           Float     // 最大虧損
+  
+  // 持有天數
+  avgWinHoldingDays Float?    // 成功部位平均持有天數
+  avgLossHoldingDays Float?   // 失敗部位平均持有天數
+  
+  // 進階指標
+  profitFactor      Float?    // 盈虧比率
+  expectancy        Float?    // 期望值
+  avgRValue         Float?    // 平均 R 值
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@unique([accountId, year, month])
+  @@index([year, month])
+  @@map("monthly_stats")
+}
+
+// 注意：SQLite 不支援 enum，使用 String 代替
+// TradeType 可用值：'BUY', 'SELL'
+// PositionStatus 可用值：'OPEN', 'CLOSED'

@@ -192,14 +192,6 @@ stock計算/
 - 目前持倉列表
 - 最近交易記錄（最多 10 筆）
 
-### 5. 使用 Prisma Studio
-
-```bash
-npm run db:studio
-```
-
-訪問 **http://localhost:5555** 查看和編輯資料庫內容。
-
 ---
 
 ## 🔧 常用指令
@@ -217,9 +209,8 @@ npm run type-check   # TypeScript 型別檢查
 ```bash
 npm run db:generate  # 生成 Prisma Client
 npm run db:push      # 推送 schema 到資料庫
-npm run db:studio    # 開啟 Prisma Studio
-npm run db:seed      # 執行種子資料
-npm run db:reset     # 重置資料庫
+npm run db:init      # 初始化帳戶
+npm run db:update-capital  # 更新初始資金
 ```
 
 ### 自訂腳本
@@ -358,7 +349,7 @@ A: 執行 `npm run db:reset` 會清空資料庫並重新初始化。
 A: 系統會自動重新計算部位，如果沒有更新，請檢查控制台是否有錯誤訊息。
 
 ### Q: 可以匯出資料嗎？
-A: 目前可使用 Prisma Studio 匯出，或直接複製 `prisma/dev.db` 檔案。
+A: 可以直接複製 `prisma/dev.db` 檔案進行備份，或使用 SQLite 工具匯出資料。
 
 ---
 

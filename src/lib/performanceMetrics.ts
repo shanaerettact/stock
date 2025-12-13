@@ -198,7 +198,7 @@ export function calculateDrawdown(
   // 排序（確保按時間順序）
   const sorted = [...balanceHistory].sort((a, b) => a.date.getTime() - b.date.getTime());
   
-  let peakBalance = sorted[0].balance;
+  let peakBalance = sorted[0]?.balance || 0;
   let maxDrawdown = 0;
   let maxDrawdownPercent = 0;
   let currentDrawdown = 0;

@@ -284,7 +284,7 @@ export function validateTradeForm(data: TradeFormData): {
  * 驗證賣出交易（確保有對應的買入部位）
  */
 export function validateSellTrade(
-  stockCode: string,
+  _stockCode: string,
   quantity: number,
   availableQuantity: number
 ): ValidationResult {

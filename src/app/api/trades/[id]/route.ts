@@ -209,7 +209,7 @@ async function updatePositionFromTrades(positionId: string) {
       totalCommission: totalBuyCommission + totalSellCommission,
       totalTax: totalSellTax,
       status: totalBuyQuantity === totalSellQuantity ? 'CLOSED' : 'OPEN',
-      exitDate: totalBuyQuantity === totalSellQuantity ? trades[trades.length - 1].tradeDate : null,
+      exitDate: totalBuyQuantity === totalSellQuantity && trades.length > 0 ? trades[trades.length - 1].tradeDate : null,
     },
   });
 }

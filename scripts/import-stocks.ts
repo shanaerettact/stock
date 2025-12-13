@@ -36,7 +36,7 @@ function parseCSV(filePath: string): StockData[] {
       stocks.push({
         code: code.trim(),
         name: name.trim(),
-        market: market ? market.trim() : '上市',
+        market: market?.trim() || '上市',
       });
     }
   }

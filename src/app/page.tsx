@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
+import DataModal from '@/components/DataModal';
 
 interface Trade {
   id: string;
@@ -25,6 +26,8 @@ interface Position {
   stockCode: string;
   stockName: string | null;
   status: string;
+  entryDate: string;
+  avgEntryPrice: number;
   totalQuantity: number;
   totalPnL: number | null;
   returnRate: number | null;
@@ -38,6 +41,9 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
+  const [selectedFeature, setSelectedFeature] = useState<'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly' | null>(null);
+  const [accountBalance, setAccountBalance] = useState(100000);
+  const [initialCapital, setInitialCapital] = useState(100000);
 
   // 載入交易記錄與部位
   const loadData = async () => {
@@ -45,10 +51,11 @@ export default function HomePage() {
       setLoading(true);
       const accountId = 'cmj47funv00007jwbtrkd22t9';
       
-      // 同時載入交易記錄和部位
-      const [tradesRes, positionsRes] = await Promise.all([
+      // 同時載入交易記錄、部位和帳戶資訊
+      const [tradesRes, positionsRes, accountRes] = await Promise.all([
         fetch(`/api/trades?accountId=${accountId}`),
-        fetch(`/api/positions?accountId=${accountId}`)
+        fetch(`/api/positions?accountId=${accountId}`),
+        fetch(`/api/account`)
       ]);
       
       if (tradesRes.ok) {
@@ -59,6 +66,12 @@ export default function HomePage() {
       if (positionsRes.ok) {
         const positionsData = await positionsRes.json();
         setPositions(positionsData);
+      }
+      
+      if (accountRes.ok) {
+        const accountData = await accountRes.json();
+        setInitialCapital(accountData.initialCapital || 100000);
+        setAccountBalance(accountData.currentBalance || 100000);
       }
     } catch (error) {
       console.error('載入資料失敗:', error);
@@ -373,53 +386,69 @@ export default function HomePage() {
               <h2 className="text-2xl font-bold text-gray-800 mb-6">
                 🎯 核心功能
               </h2>
+              <p className="text-gray-600 mb-6 text-sm">
+                點擊功能卡片查看詳細說明
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <FeatureCard
                   icon="📝"
                   title="交易記錄"
                   description="記錄每筆買賣，自動計算手續費與交易稅"
+                  onClick={() => setSelectedFeature('trades')}
                 />
                 <FeatureCard
                   icon="📊"
                   title="績效分析"
                   description="勝率、盈虧比、期望值、R 值等專業指標"
+                  onClick={() => setSelectedFeature('performance')}
                 />
                 <FeatureCard
                   icon="💰"
                   title="資金管理"
                   description="追蹤帳戶餘額、最大回撤、風險控制"
+                  onClick={() => setSelectedFeature('funds')}
                 />
                 <FeatureCard
                   icon="📈"
                   title="部位管理"
                   description="成對交易追蹤，計算持有天數與報酬率"
+                  onClick={() => setSelectedFeature('positions')}
                 />
                 <FeatureCard
                   icon="🎲"
                   title="R 值分析"
                   description="風險報酬比計算，量化交易品質"
+                  onClick={() => setSelectedFeature('rvalue')}
                 />
                 <FeatureCard
                   icon="📅"
                   title="月度統計"
                   description="按月份統計績效，找出交易規律"
+                  onClick={() => setSelectedFeature('monthly')}
                 />
               </div>
             </div>
 
+            {/* 資料統計 Modal */}
+            {selectedFeature && (
+              <DataModal
+                isOpen={!!selectedFeature}
+                onClose={() => setSelectedFeature(null)}
+                type={selectedFeature}
+                trades={trades}
+                positions={positions}
+                accountBalance={accountBalance}
+                initialCapital={initialCapital}
+              />
+            )}
+
             {/* 快速開始按鈕 */}
-            <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex justify-center">
               <button
                 onClick={() => setShowForm(true)}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition-colors text-lg"
+                className="w-full max-w-md bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition-colors text-lg"
               >
                 ➕ 新增交易記錄
-              </button>
-              <button
-                onClick={() => window.open('http://localhost:5555', '_blank')}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition-colors text-lg"
-              >
-                🔍 開啟 Prisma Studio
               </button>
             </div>
 
@@ -510,17 +539,28 @@ function FeatureCard({
   icon,
   title,
   description,
+  onClick,
 }: {
   icon: string;
   title: string;
   description: string;
+  onClick: () => void;
 }) {
   return (
-    <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-6 border border-blue-200">
+    <button
+      onClick={onClick}
+      className="bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 rounded-lg p-6 border border-blue-200 hover:border-blue-300 transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1 text-left w-full"
+    >
       <div className="text-4xl mb-3">{icon}</div>
       <h3 className="text-lg font-semibold text-gray-800 mb-2">{title}</h3>
-      <p className="text-gray-600 text-sm">{description}</p>
-    </div>
+      <p className="text-gray-600 text-sm mb-3">{description}</p>
+      <div className="text-blue-600 text-xs font-semibold flex items-center gap-1">
+        點擊查看詳情
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </div>
+    </button>
   );
 }
 

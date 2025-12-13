@@ -6,7 +6,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { calculateTrade, type TradeInput, type TradeUnit } from '@/lib/tradeCalculations';
+import { calculateTrade, type TradeUnit } from '@/lib/tradeCalculations';
 import { getStockNameByCode, getStockCodeByName } from '@/data/stockList';
 
 // ===== 型別定義 =====
@@ -63,7 +63,7 @@ export default function TradeForm({
     quantity: initialData?.quantity || '',
     unit: initialData?.unit || 'SHARES', // 預設為零股
     plannedStopLoss: initialData?.plannedStopLoss || '',
-    positionId: initialData?.positionId,
+    positionId: initialData?.positionId || undefined,
   });
   
   const [errors, setErrors] = useState<TradeFormErrors>({});

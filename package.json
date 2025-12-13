@@ -15,7 +15,6 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:studio": "prisma studio",
     "db:init": "tsx prisma/init-account.ts",
     "db:update-capital": "tsx prisma/update-capital.ts",
     "type-check": "tsc --noEmit",

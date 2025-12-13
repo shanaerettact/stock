@@ -116,7 +116,6 @@ stock計算/
 - **元件樣式** → 使用 Tailwind CSS class
 
 #### 資料管理
-- **查看資料** → 執行 `npm run db:studio` → 訪問 http://localhost:5555
 - **初始化帳戶** → 執行 `npm run db:init`
 - **更新初始資金** → 執行 `npm run db:update-capital`
 
@@ -141,7 +140,6 @@ npm run type-check   # TypeScript 型別檢查
 ```bash
 npm run db:generate  # 生成 Prisma Client
 npm run db:push      # 更新資料庫結構
-npm run db:studio    # 開啟資料庫管理介面
 npm run db:init      # 初始化帳戶
 ```
 

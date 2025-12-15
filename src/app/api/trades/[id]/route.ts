@@ -62,6 +62,8 @@ export async function PUT(
       price,
       quantity,
       unit,
+      securityType = 'STOCK',
+      isDayTrade = false,
     } = body;
 
     // 驗證必填欄位
@@ -85,6 +87,8 @@ export async function PUT(
       quantity: parseInt(quantity),
       unit: unit as TradeUnit,
       tradeType,
+      securityType,
+      isDayTrade,
     });
 
     // 更新交易記錄
@@ -102,6 +106,8 @@ export async function PUT(
         commission: calculation.commission,
         tax: calculation.tax,
         totalCost: calculation.totalCost,
+        securityType,
+        isDayTrade,
       },
       include: {
         position: true,
@@ -198,18 +204,40 @@ async function updatePositionFromTrades(positionId: string) {
   const totalSellTax = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.tax, 0);
   const avgExitPrice = totalSellQuantity > 0 ? totalSellAmount / totalSellQuantity : null;
 
+  // 計算損益（僅在有賣出時）
+  const remainingQuantity = totalBuyQuantity - totalSellQuantity;
+  const isClosed = remainingQuantity === 0 && sellTrades.length > 0;
+
+  // 計算總損益 = 賣出淨收入 - 對應買入成本
+  const totalPnL = isClosed
+    ? (totalSellAmount - totalSellCommission - totalSellTax) - (totalBuyAmount + totalBuyCommission)
+    : null;
+  const returnRate = isClosed && totalBuyAmount > 0
+    ? (totalPnL! / (totalBuyAmount + totalBuyCommission)) * 100
+    : null;
+
+  // 持有天數
+  const entryDate = buyTrades[0]?.tradeDate;
+  const exitDate = isClosed ? sellTrades[sellTrades.length - 1]?.tradeDate : null;
+  const holdingDays = entryDate && exitDate
+    ? Math.ceil((new Date(exitDate).getTime() - new Date(entryDate).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+
   // 更新部位
   await prisma.position.update({
     where: { id: positionId },
     data: {
-      totalQuantity: totalBuyQuantity - totalSellQuantity,
+      totalQuantity: remainingQuantity,
       avgEntryPrice,
       avgExitPrice,
       totalInvested: totalBuyAmount + totalBuyCommission,
       totalCommission: totalBuyCommission + totalSellCommission,
       totalTax: totalSellTax,
-      status: totalBuyQuantity === totalSellQuantity ? 'CLOSED' : 'OPEN',
-      exitDate: totalBuyQuantity === totalSellQuantity && trades.length > 0 ? trades[trades.length - 1].tradeDate : null,
+      status: isClosed ? 'CLOSED' : 'OPEN',
+      exitDate: exitDate ? new Date(exitDate) : null,
+      totalPnL,
+      returnRate,
+      holdingDays,
     },
   });
 }

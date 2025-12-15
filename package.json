@@ -20,7 +20,8 @@
     "type-check": "tsc --noEmit",
     "clean": "rm -rf .next node_modules/.cache",
     "stocks:import": "tsx scripts/import-stocks.ts",
-    "stocks:guide": "tsx scripts/fetch-twse-stocks.ts"
+    "stocks:guide": "tsx scripts/fetch-twse-stocks.ts",
+    "stocks:update": "tsx scripts/fetch-twse-stocks.ts"
   },
   "keywords": [
     "stock",

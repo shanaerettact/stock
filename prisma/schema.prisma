@@ -49,6 +49,8 @@ model Trade {
   commission        Float     // 手續費（0.1425% × 0.6）
   tax               Float     @default(0) // 交易稅（賣出時 0.3%）
   totalCost         Float     // 總成本 = amount + commission + tax
+  securityType      String    @default("STOCK") // STOCK / ETF / TDR / WARRANT
+  isDayTrade        Boolean   @default(false)   // 是否為現股當沖
   
   // 關聯部位
   positionId        String?
@@ -86,6 +88,7 @@ model Position {
   avgExitPrice      Float?       // 平均賣出價
   
   // 風險管理
+  stopLossPrice     Float?       // 停損價格（每股）
   plannedStopLoss   Float?       // 預計停損金額（Risk Amount）
   maxDrawdown       Float?       // 該部位最大回撤
   

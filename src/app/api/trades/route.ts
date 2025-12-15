@@ -63,8 +63,11 @@ export async function POST(request: NextRequest) {
       price,
       quantity,
       unit = 'SHARES', // 預設為零股
+      stopLossPrice,
       plannedStopLoss,
       positionId,
+      securityType = 'STOCK',
+      isDayTrade = false,
     } = body;
 
     // 計算交易費用
@@ -73,28 +76,46 @@ export async function POST(request: NextRequest) {
       quantity: parseInt(quantity),
       unit,
       tradeType,
+      securityType,
+      isDayTrade,
     });
 
     // 檢查是否需要建立新部位或更新現有部位
     let finalPositionId = positionId;
 
-    if (!positionId && tradeType === 'BUY') {
-      // 建立新部位（totalQuantity 以股數為單位）
-      const position = await prisma.position.create({
-        data: {
+    if (!positionId) {
+      // 查找該股票是否有現有的開倉部位
+      const existingPosition = await prisma.position.findFirst({
+        where: {
           accountId,
           stockCode,
-          stockName: stockName || null,
           status: 'OPEN',
-          entryDate: new Date(tradeDate),
-          avgEntryPrice: parseFloat(price),
-          totalQuantity: calculation.totalShares, // 使用總股數
-          plannedStopLoss: plannedStopLoss ? parseFloat(plannedStopLoss) : null,
-          totalInvested: calculation.totalCost,
-          totalCommission: calculation.commission,
         },
+        orderBy: { entryDate: 'desc' },
       });
-      finalPositionId = position.id;
+
+      if (existingPosition) {
+        // 有現有開倉部位，使用該部位
+        finalPositionId = existingPosition.id;
+      } else if (tradeType === 'BUY') {
+        // 沒有開倉部位且是買入，建立新部位
+        const position = await prisma.position.create({
+          data: {
+            accountId,
+            stockCode,
+            stockName: stockName || null,
+            status: 'OPEN',
+            entryDate: new Date(tradeDate),
+            avgEntryPrice: parseFloat(price),
+            totalQuantity: calculation.totalShares,
+            stopLossPrice: stopLossPrice ? parseFloat(stopLossPrice) : null,
+            plannedStopLoss: plannedStopLoss ? parseFloat(plannedStopLoss) : null,
+            totalInvested: calculation.totalCost,
+            totalCommission: calculation.commission,
+          },
+        });
+        finalPositionId = position.id;
+      }
     }
 
     // 建立交易記錄
@@ -112,12 +133,19 @@ export async function POST(request: NextRequest) {
         commission: calculation.commission,
         tax: calculation.tax,
         totalCost: calculation.totalCost,
+        securityType,
+        isDayTrade,
         positionId: finalPositionId,
       },
       include: {
         position: true,
       },
     });
+
+    // 如果有關聯部位，重新計算部位資訊（同步持倉）
+    if (finalPositionId) {
+      await updatePositionFromTrades(finalPositionId);
+    }
 
     // 更新帳戶餘額
     const account = await prisma.account.findUnique({
@@ -130,13 +158,19 @@ export async function POST(request: NextRequest) {
           ? account.currentBalance - calculation.totalCost
           : account.currentBalance + calculation.totalCost;
 
-      await prisma.account.update({
+      await prisma.account.updateMany({
         where: { id: accountId },
         data: { currentBalance: newBalance },
       });
     }
 
-    return NextResponse.json(trade, { status: 201 });
+    // 重新查詢交易記錄（含更新後的部位資訊）
+    const updatedTrade = await prisma.trade.findUnique({
+      where: { id: trade.id },
+      include: { position: true },
+    });
+
+    return NextResponse.json(updatedTrade, { status: 201 });
   } catch (error) {
     console.error('新增交易失敗:', error);
     return NextResponse.json(
@@ -155,7 +189,7 @@ export async function DELETE(request: NextRequest) {
     if (!id) {
       return NextResponse.json(
         { error: '缺少交易 ID' },
-        { status: 400 }
+        { status: 404 }
       );
     }
 
@@ -171,5 +205,81 @@ export async function DELETE(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// ===== 輔助函式 =====
+
+interface TradeRecord {
+  id: string;
+  tradeType: string;
+  quantity: number;
+  amount: number;
+  commission: number;
+  tax: number;
+  tradeDate: Date;
+}
+
+/**
+ * 根據交易記錄重新計算部位資訊
+ */
+async function updatePositionFromTrades(positionId: string) {
+  const trades = await prisma.trade.findMany({
+    where: { positionId },
+    orderBy: { tradeDate: 'asc' },
+  });
+
+  if (trades.length === 0) return;
+
+  // 計算買入交易
+  const buyTrades = trades.filter((t: TradeRecord) => t.tradeType === 'BUY');
+  const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.quantity, 0);
+  const totalBuyAmount = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
+  const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
+  const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
+
+  // 計算賣出交易
+  const sellTrades = trades.filter((t: TradeRecord) => t.tradeType === 'SELL');
+  const totalSellQuantity = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.quantity, 0);
+  const totalSellAmount = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
+  const totalSellCommission = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
+  const totalSellTax = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.tax, 0);
+  const avgExitPrice = totalSellQuantity > 0 ? totalSellAmount / totalSellQuantity : null;
+
+  // 計算損益（僅在有賣出時）
+  const remainingQuantity = totalBuyQuantity - totalSellQuantity;
+  const isClosed = remainingQuantity === 0 && sellTrades.length > 0;
+
+  // 計算總損益 = 賣出淨收入 - 對應買入成本
+  const totalPnL = isClosed
+    ? (totalSellAmount - totalSellCommission - totalSellTax) - (totalBuyAmount + totalBuyCommission)
+    : null;
+  const returnRate = isClosed && totalBuyAmount > 0
+    ? (totalPnL! / (totalBuyAmount + totalBuyCommission)) * 100
+    : null;
+
+  // 持有天數
+  const entryDate = buyTrades[0]?.tradeDate;
+  const exitDate = isClosed ? sellTrades[sellTrades.length - 1]?.tradeDate : null;
+  const holdingDays = entryDate && exitDate
+    ? Math.ceil((new Date(exitDate).getTime() - new Date(entryDate).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  // 更新部位
+  await prisma.position.update({
+    where: { id: positionId },
+    data: {
+      totalQuantity: remainingQuantity,
+      avgEntryPrice,
+      avgExitPrice,
+      totalInvested: totalBuyAmount + totalBuyCommission,
+      totalCommission: totalBuyCommission + totalSellCommission,
+      totalTax: totalSellTax,
+      status: isClosed ? 'CLOSED' : 'OPEN',
+      exitDate: exitDate ? new Date(exitDate) : null,
+      totalPnL,
+      returnRate,
+      holdingDays,
+    },
+  });
 }
 

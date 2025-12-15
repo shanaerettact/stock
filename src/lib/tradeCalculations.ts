@@ -5,18 +5,23 @@
 
 // ===== 常數定義 =====
 const COMMISSION_RATE = 0.001425; // 0.1425%
-const COMMISSION_DISCOUNT = 0.6; // 六折
-const TAX_RATE = 0.003; // 0.3%（僅賣出）
+const COMMISSION_DISCOUNT = 0.6; // 電子交易常見 6 折
+const TAX_RATE_STOCK = 0.003; // 一般股票 0.3%（賣出）
+const TAX_RATE_STOCK_DAY_TRADE = 0.0015; // 現股當沖 0.15%（賣出）
+const TAX_RATE_ETF_TDR_WARRANT = 0.001; // ETF / 權證 / TDR 0.1%（賣出）
 const SHARES_PER_LOT = 1000; // 台股一張 = 1000 股
 
 // ===== 型別定義 =====
 export type TradeUnit = 'SHARES' | 'LOTS'; // 零股 | 張
+export type SecurityType = 'STOCK' | 'ETF' | 'TDR' | 'WARRANT';
 
 export interface TradeInput {
   price: number; // 成交價格（每股）
   quantity: number; // 數量（依據 unit 而定）
   unit: TradeUnit; // 單位：零股(SHARES) 或 張(LOTS)
   tradeType: 'BUY' | 'SELL';
+  securityType?: SecurityType; // 標的類型：股票/ETF/TDR/權證
+  isDayTrade?: boolean; // 是否為現股當沖
 }
 
 export interface TradeCalculation {
@@ -63,10 +68,11 @@ export function calculateAmount(price: number, quantity: number, unit: TradeUnit
  * @param amount 成交金額
  * @returns 手續費 = amount × 0.1425% × 0.6
  */
-export function calculateCommission(amount: number): number {
+export function calculateCommission(amount: number, totalShares: number, unit: TradeUnit): number {
   const commission = amount * COMMISSION_RATE * COMMISSION_DISCOUNT;
-  // 手續費最低 20 元（台股規則，可選）
-  return Math.max(commission, 20);
+  const isOddLot = unit === 'SHARES' && totalShares < SHARES_PER_LOT;
+  const minimum = isOddLot ? 1 : 20;
+  return Math.max(commission, minimum);
 }
 
 /**
@@ -75,11 +81,22 @@ export function calculateCommission(amount: number): number {
  * @param tradeType 交易類型
  * @returns 交易稅 = amount × 0.3%（賣出時）
  */
-export function calculateTax(amount: number, tradeType: 'BUY' | 'SELL'): number {
-  if (tradeType === 'SELL') {
-    return amount * TAX_RATE;
+export function calculateTax(
+  amount: number,
+  tradeType: 'BUY' | 'SELL',
+  securityType: SecurityType = 'STOCK',
+  isDayTrade = false
+): number {
+  if (tradeType !== 'SELL') {
+    return 0;
   }
-  return 0;
+
+  if (securityType === 'ETF' || securityType === 'TDR' || securityType === 'WARRANT') {
+    return amount * TAX_RATE_ETF_TDR_WARRANT;
+  }
+
+  const rate = isDayTrade ? TAX_RATE_STOCK_DAY_TRADE : TAX_RATE_STOCK;
+  return amount * rate;
 }
 
 /**
@@ -90,8 +107,8 @@ export function calculateTax(amount: number, tradeType: 'BUY' | 'SELL'): number 
 export function calculateTrade(input: TradeInput): TradeCalculation {
   const totalShares = convertToShares(input.quantity, input.unit);
   const amount = calculateAmount(input.price, input.quantity, input.unit);
-  const commission = calculateCommission(amount);
-  const tax = calculateTax(amount, input.tradeType);
+  const commission = calculateCommission(amount, totalShares, input.unit);
+  const tax = calculateTax(amount, input.tradeType, input.securityType, input.isDayTrade);
   
   // 買入：總成本 = 成交金額 + 手續費
   // 賣出：淨收入 = 成交金額 - 手續費 - 交易稅

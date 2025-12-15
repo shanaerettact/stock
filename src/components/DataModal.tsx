@@ -11,6 +11,8 @@ interface Trade {
   price: number;
   quantity: number;
   unit: string;
+  securityType: string;
+  isDayTrade: boolean;
   amount: number;
   commission: number;
   tax: number;
@@ -25,6 +27,7 @@ interface Position {
   entryDate: string;
   avgEntryPrice: number;
   totalQuantity: number;
+  stopLossPrice: number | null;
   totalPnL: number | null;
   returnRate: number | null;
 }
@@ -290,9 +293,12 @@ export default function DataModal({
                         持倉中
                       </span>
                     </div>
-                    <div className="text-sm text-gray-600 mt-2">
-                      成本：{position.avgEntryPrice} 元 • 
-                      股數：{position.totalQuantity.toLocaleString()} 股
+                    <div className="text-sm text-gray-600 mt-2 flex flex-wrap gap-x-3">
+                      <span>成本：{position.avgEntryPrice.toLocaleString()} 元</span>
+                      <span>股數：{position.totalQuantity.toLocaleString()} 股</span>
+                      <span className="text-red-600 font-medium">
+                        停損：{(position.stopLossPrice || Math.round(position.avgEntryPrice * 0.9 * 100) / 100).toLocaleString()} 元
+                      </span>
                     </div>
                   </div>
                 ))}

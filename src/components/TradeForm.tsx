@@ -22,8 +22,11 @@ export interface TradeFormData {
   price: string;
   quantity: string;
   unit: TradeUnit; // 單位：零股(SHARES) 或 張(LOTS)
+  securityType: 'STOCK' | 'ETF' | 'TDR' | 'WARRANT';
+  isDayTrade: boolean;
   
   // 風險管理（可選）
+  stopLossPrice: string; // 停損價格
   plannedStopLoss: string;
   
   // 關聯部位（可選，用於加碼或平倉）
@@ -54,14 +57,22 @@ export default function TradeForm({
   submitLabel = '新增交易',
 }: TradeFormProps) {
   // 表單狀態
+  const getDefaultDate = (): string => {
+    const today = new Date().toISOString().split('T')[0];
+    return today || '';
+  };
+  
   const [formData, setFormData] = useState<TradeFormData>({
     stockCode: initialData?.stockCode || '',
     stockName: initialData?.stockName || '',
     tradeType: initialData?.tradeType || 'BUY',
-    tradeDate: initialData?.tradeDate || new Date().toISOString().split('T')[0],
+    tradeDate: initialData?.tradeDate || getDefaultDate(),
     price: initialData?.price || '',
     quantity: initialData?.quantity || '',
     unit: initialData?.unit || 'SHARES', // 預設為零股
+    securityType: initialData?.securityType || 'STOCK',
+    isDayTrade: initialData?.isDayTrade || false,
+    stopLossPrice: initialData?.stopLossPrice || '',
     plannedStopLoss: initialData?.plannedStopLoss || '',
     positionId: initialData?.positionId || undefined,
   });
@@ -70,7 +81,7 @@ export default function TradeForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [preview, setPreview] = useState<ReturnType<typeof calculateTrade> | null>(null);
   
-  // 即時計算預覽與自動設定停損金額
+  // 即時計算預覽與自動計算停損價（買入價 × 90%）
   useEffect(() => {
     const price = parseFloat(formData.price);
     const quantity = parseInt(formData.quantity);
@@ -81,19 +92,25 @@ export default function TradeForm({
         quantity,
         unit: formData.unit,
         tradeType: formData.tradeType,
+        securityType: formData.securityType,
+        isDayTrade: formData.isDayTrade,
       });
       setPreview(calculation);
       
-      // 自動計算停損金額（成交金額 - 成交金額 × 10%）
-      const stopLossAmount = Math.round(calculation.amount * 0.9);
+      // 自動計算停損價 = 買入價 × 90%（容忍 10% 虧損）
+      const autoStopLossPrice = Math.round(price * 0.9 * 100) / 100;
+      const totalShares = formData.unit === 'LOTS' ? quantity * 1000 : quantity;
+      const stopLossAmount = Math.round((price - autoStopLossPrice) * totalShares);
+      
       setFormData(prev => ({
         ...prev,
+        stopLossPrice: autoStopLossPrice.toString(),
         plannedStopLoss: stopLossAmount.toString(),
       }));
     } else {
       setPreview(null);
     }
-  }, [formData.price, formData.quantity, formData.unit, formData.tradeType]);
+  }, [formData.price, formData.quantity, formData.unit, formData.tradeType, formData.securityType, formData.isDayTrade]);
   
   // 表單驗證
   const validateForm = (): boolean => {
@@ -143,25 +160,27 @@ export default function TradeForm({
   // 處理輸入變更
   const handleChange = (
     field: keyof TradeFormData,
-    value: string
+    value: string | boolean
   ) => {
     // 自動查詢股票資訊並一次更新
-    if (field === 'stockCode' && value.trim()) {
+    if (field === 'stockCode' && typeof value === 'string' && value.trim()) {
       const name = getStockNameByCode(value.trim());
       if (name) {
         setFormData(prev => ({ ...prev, stockCode: value, stockName: name }));
       } else {
-        setFormData(prev => ({ ...prev, [field]: value }));
+        setFormData(prev => ({ ...prev, stockCode: value }));
       }
-    } else if (field === 'stockName' && value.trim()) {
+    } else if (field === 'stockName' && typeof value === 'string' && value.trim()) {
       const code = getStockCodeByName(value.trim());
       if (code) {
         setFormData(prev => ({ ...prev, stockName: value, stockCode: code }));
       } else {
-        setFormData(prev => ({ ...prev, [field]: value }));
+        setFormData(prev => ({ ...prev, stockName: value }));
       }
-    } else {
+    } else if (typeof value === 'boolean') {
       setFormData(prev => ({ ...prev, [field]: value }));
+    } else {
+      setFormData(prev => ({ ...prev, [field]: value as string }));
     }
     
     // 清除該欄位的錯誤訊息
@@ -370,24 +389,41 @@ export default function TradeForm({
         </div>
       </div>
       
-      {/* 風險管理（自動計算） */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          預計停損金額（自動計算：成交金額 - 10%）
-        </label>
-        <div className="relative">
-          <input
-            type="text"
-            value={formData.plannedStopLoss ? `${parseFloat(formData.plannedStopLoss).toLocaleString('zh-TW')} 元` : ''}
-            readOnly
-            placeholder="自動計算中..."
-            className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-700 cursor-not-allowed"
-          />
+      {/* 標的類型與當沖設定 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            標的類型
+          </label>
+          <select
+            value={formData.securityType}
+            onChange={(e) => handleChange('securityType', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+          >
+            <option value="STOCK">股票</option>
+            <option value="ETF">ETF / 指數型</option>
+            <option value="TDR">TDR</option>
+            <option value="WARRANT">權證</option>
+          </select>
+          <p className="mt-1 text-xs text-blue-600">
+            💡 稅率：股票 0.3%（當沖 0.15%）、ETF/TDR/權證 0.1%（賣出時）
+          </p>
         </div>
-        <p className="mt-1 text-xs text-blue-600">
-          💡 當股票價值跌至此金額時停損出場（容忍 10% 虧損）
-        </p>
+        
+        <div className="flex items-center gap-3 mt-6 md:mt-8">
+          <input
+            id="isDayTrade"
+            type="checkbox"
+            checked={formData.isDayTrade}
+            onChange={(e) => handleChange('isDayTrade', e.target.checked)}
+            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+          />
+          <label htmlFor="isDayTrade" className="text-sm text-gray-700">
+            現股當沖（稅率 0.15%，僅適用股票）
+          </label>
+        </div>
       </div>
+      
       
       {/* 即時計算預覽 */}
       {preview && (
@@ -453,18 +489,18 @@ export default function TradeForm({
               {preview.totalCost.toLocaleString('zh-TW')} 元
             </div>
             
-            {formData.tradeType === 'BUY' && formData.plannedStopLoss && preview && (
+            {formData.tradeType === 'BUY' && formData.stopLossPrice && preview && (
               <>
                 <div className="col-span-2 border-t border-blue-300 my-2"></div>
                 
-                <div className="text-gray-700">預計停損金額：</div>
+                <div className="text-gray-700">停損價（自動）：</div>
                 <div className="font-semibold text-right text-red-600">
-                  {parseFloat(formData.plannedStopLoss).toLocaleString('zh-TW')} 元
+                  {parseFloat(formData.stopLossPrice).toLocaleString('zh-TW')} 元
                 </div>
                 
-                <div className="text-gray-700">可承受損失：</div>
+                <div className="text-gray-700">預計停損損失：</div>
                 <div className="font-semibold text-right text-orange-600">
-                  {(preview.amount - parseFloat(formData.plannedStopLoss)).toLocaleString('zh-TW')} 元（10%）
+                  {parseFloat(formData.plannedStopLoss || '0').toLocaleString('zh-TW')} 元（10%）
                 </div>
               </>
             )}

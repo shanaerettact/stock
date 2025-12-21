@@ -78,9 +78,14 @@ export async function POST(request: NextRequest) {
     const buyTrades = position.trades.filter(t => t.tradeType === 'BUY');
     const sellTrades = position.trades.filter(t => t.tradeType === 'SELL');
 
-    // 檢查是否已完全賣出
-    const totalBuyQuantity = buyTrades.reduce((sum, t) => sum + t.quantity, 0);
-    const totalSellQuantity = sellTrades.reduce((sum, t) => sum + t.quantity, 0);
+    // 輔助函式：將交易數量轉換為股數
+    const convertToShares = (quantity: number, unit: string): number => {
+      return unit === 'LOTS' ? quantity * 1000 : quantity;
+    };
+
+    // 檢查是否已完全賣出（需要將數量轉換為股數）
+    const totalBuyQuantity = buyTrades.reduce((sum, t) => sum + convertToShares(t.quantity, t.unit), 0);
+    const totalSellQuantity = sellTrades.reduce((sum, t) => sum + convertToShares(t.quantity, t.unit), 0);
 
     if (totalBuyQuantity !== totalSellQuantity) {
       return NextResponse.json(
@@ -89,9 +94,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 計算平均賣出價
+    // 計算平均賣出價（使用轉換後的股數）
     const avgExitPrice = calculateWeightedAvgPrice(
-      sellTrades.map(t => ({ price: t.price, quantity: t.quantity }))
+      sellTrades.map(t => ({ price: t.price, quantity: convertToShares(t.quantity, t.unit) }))
     );
 
     // 找出最後一筆賣出日期

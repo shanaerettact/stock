@@ -20,6 +20,7 @@ export default function HomePage() {
   const [selectedFeature, setSelectedFeature] = useState<'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly' | null>(null);
   const [accountBalance, setAccountBalance] = useState(100000);
   const [initialCapital, setInitialCapital] = useState(100000);
+  const [recalculating, setRecalculating] = useState(false);
 
   // 顯示訊息
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -107,6 +108,31 @@ export default function HomePage() {
     setShowForm(false);
   };
 
+  // 重新計算所有部位
+  const handleRecalculatePositions = async () => {
+    try {
+      setRecalculating(true);
+      const response = await fetch('/api/positions/recalculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: ACCOUNT_ID }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '重新計算失敗');
+      }
+
+      const result = await response.json();
+      showMessage('success', `✅ ${result.message}，已關聯 ${result.linkedTrades} 筆孤立交易`);
+      loadData();
+    } catch (error) {
+      showMessage('error', error instanceof Error ? error.message : '重新計算失敗');
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
   const openPositions = positions.filter(p => p.status === 'OPEN');
   const closedPositions = positions.filter(p => p.status === 'CLOSED');
 
@@ -141,6 +167,27 @@ export default function HomePage() {
               <StatCard label="交易總數" value={trades.length} unit="筆" color="blue" />
               <StatCard label="持倉部位" value={openPositions.length} unit="個" color="orange" />
               <StatCard label="已平倉" value={closedPositions.length} unit="個" color="green" />
+            </div>
+
+            {/* 工具按鈕 */}
+            <div className="flex justify-end">
+              <button
+                onClick={handleRecalculatePositions}
+                disabled={recalculating}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors text-sm"
+              >
+                {recalculating ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    計算中...
+                  </>
+                ) : (
+                  <>🔄 重新計算部位</>
+                )}
+              </button>
             </div>
 
             {/* 持倉部位 */}

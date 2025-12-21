@@ -28,8 +28,10 @@ interface Position {
   avgEntryPrice: number;
   totalQuantity: number;
   stopLossPrice: number | null;
+  plannedStopLoss: number | null;
   totalPnL: number | null;
   returnRate: number | null;
+  rValue: number | null;
 }
 
 interface DataModalProps {
@@ -347,6 +349,141 @@ export default function DataModal({
                 )}
               </div>
             </div>
+          </div>
+        );
+
+      case 'rvalue':
+        const closedWithR = positions.filter(p => p.status === 'CLOSED');
+        const positionsWithR = closedWithR.filter(p => p.rValue !== null);
+        const avgRValue = positionsWithR.length > 0
+          ? positionsWithR.reduce((sum, p) => sum + (p.rValue || 0), 0) / positionsWithR.length
+          : null;
+        const positiveRCount = positionsWithR.filter(p => (p.rValue || 0) > 0).length;
+        const negativeRCount = positionsWithR.filter(p => (p.rValue || 0) < 0).length;
+        const positiveRRate = positionsWithR.length > 0 
+          ? (positiveRCount / positionsWithR.length * 100).toFixed(1)
+          : '0.0';
+
+        // R 值分布
+        const rRanges = [
+          { min: -Infinity, max: -2, label: '< -2R', color: 'bg-red-600' },
+          { min: -2, max: -1, label: '-2R ~ -1R', color: 'bg-red-400' },
+          { min: -1, max: 0, label: '-1R ~ 0R', color: 'bg-orange-400' },
+          { min: 0, max: 1, label: '0R ~ 1R', color: 'bg-yellow-400' },
+          { min: 1, max: 2, label: '1R ~ 2R', color: 'bg-green-400' },
+          { min: 2, max: 3, label: '2R ~ 3R', color: 'bg-green-500' },
+          { min: 3, max: Infinity, label: '> 3R', color: 'bg-green-600' },
+        ];
+        const rDistribution = rRanges.map(range => ({
+          ...range,
+          count: positionsWithR.filter(p => (p.rValue || 0) >= range.min && (p.rValue || 0) < range.max).length,
+        }));
+
+        return (
+          <div className="space-y-6">
+            {/* R 值說明 */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+              <h4 className="font-semibold text-blue-900 mb-2">📚 什麼是 R 值？</h4>
+              <p className="text-blue-800 mb-2">
+                <strong>R 值 = 實際損益 ÷ 預計停損金額</strong>
+              </p>
+              <ul className="list-disc list-inside text-blue-700 space-y-1">
+                <li><strong>1R</strong> = 賺取 1 倍停損金額（例如：停損設 1000 元，實際賺 1000 元）</li>
+                <li><strong>-1R</strong> = 虧損等於停損金額（嚴格執行停損）</li>
+                <li><strong>2R, 3R</strong> = 獲利是風險的 2 倍、3 倍（優質交易）</li>
+              </ul>
+            </div>
+
+            {positionsWithR.length > 0 ? (
+              <>
+                {/* R 值統計 */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-4 border border-indigo-200">
+                    <div className="text-sm text-gray-600">平均 R 值</div>
+                    <div className={`text-3xl font-bold ${(avgRValue || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {avgRValue !== null ? `${avgRValue >= 0 ? '+' : ''}${avgRValue.toFixed(2)}R` : '--'}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {positionsWithR.length} 筆交易有 R 值
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+                    <div className="text-sm text-gray-600">正 R 值比例</div>
+                    <div className="text-3xl font-bold text-green-600">{positiveRRate}%</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {positiveRCount} 勝 / {negativeRCount} 敗
+                    </div>
+                  </div>
+                </div>
+
+                {/* R 值分布圖 */}
+                <div className="bg-white rounded-lg border p-4">
+                  <h4 className="font-semibold text-gray-800 mb-4">R 值分布</h4>
+                  <div className="space-y-2">
+                    {rDistribution.map((range) => (
+                      <div key={range.label} className="flex items-center gap-3">
+                        <div className="w-24 text-sm text-gray-600">{range.label}</div>
+                        <div className="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden">
+                          <div 
+                            className={`h-full ${range.color} transition-all duration-500`}
+                            style={{ width: `${positionsWithR.length > 0 ? (range.count / positionsWithR.length) * 100 : 0}%` }}
+                          />
+                        </div>
+                        <div className="w-12 text-right text-sm font-semibold text-gray-700">
+                          {range.count}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* R 值交易列表 */}
+                <div>
+                  <h4 className="font-semibold text-gray-800 mb-3">交易 R 值記錄</h4>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {positionsWithR.slice(0, 10).map(position => (
+                      <div key={position.id} className={`rounded p-3 border ${
+                        (position.rValue || 0) >= 0 
+                          ? 'bg-green-50 border-green-200' 
+                          : 'bg-red-50 border-red-200'
+                      }`}>
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <span className="font-semibold">{position.stockCode}</span>
+                            {position.stockName && <span className="text-gray-600 ml-2">{position.stockName}</span>}
+                          </div>
+                          <span className={`text-lg font-bold ${
+                            (position.rValue || 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {(position.rValue || 0) >= 0 ? '+' : ''}{(position.rValue || 0).toFixed(2)}R
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-600 mt-1">
+                          損益：{(position.totalPnL || 0) >= 0 ? '+' : ''}{(position.totalPnL || 0).toLocaleString()} 元
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-12">
+                <div className="text-6xl mb-4">🎯</div>
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">尚無 R 值資料</h3>
+                <p className="text-gray-600 mb-4">
+                  R 值需要在<strong>買入時設定停損金額</strong>才能計算
+                </p>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-left max-w-md mx-auto">
+                  <h4 className="font-semibold text-yellow-800 mb-2">如何產生 R 值資料？</h4>
+                  <ol className="list-decimal list-inside text-yellow-700 space-y-1">
+                    <li>新增買入交易時，系統會自動計算停損價（買入價 × 90%）</li>
+                    <li>停損金額 = (買入價 - 停損價) × 股數</li>
+                    <li>平倉後，R 值 = 實際損益 ÷ 停損金額</li>
+                  </ol>
+                </div>
+              </div>
+            )}
           </div>
         );
 

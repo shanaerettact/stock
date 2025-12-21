@@ -112,7 +112,10 @@ export default function PositionsTable({ positions, onMessage }: PositionsTableP
 
       {Object.keys(stockPrices).length > 0 && (
         <div className="mt-4 text-xs text-gray-500 text-right">
-          資料來源：<a href="https://openapi.twse.com.tw/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">TWSE OpenAPI</a>
+          資料來源：
+          <a href="https://openapi.twse.com.tw/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline ml-1">TWSE OpenAPI</a>
+          {'、'}
+          <a href="https://finmind.github.io/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">FinMind API</a>
         </div>
       )}
     </div>
@@ -170,6 +173,22 @@ function PositionRow({ position, priceData }: { position: Position; priceData?: 
         </div>
         {position.stockName && (
           <div className="text-sm text-gray-600">{position.stockName}</div>
+        )}
+        {/* 52 周新高提示 */}
+        {priceData?.is52WeekHigh && (
+          <div className="mt-1 flex items-center gap-1">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800">
+              🎯 52周新高
+            </span>
+          </div>
+        )}
+        {/* 交易量提示 */}
+        {priceData?.isVolumeHigh && priceData?.volumeRatio && (
+          <div className="mt-1 flex items-center gap-1">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800">
+              📈 量增 {((priceData.volumeRatio - 1) * 100).toFixed(0)}%
+            </span>
+          </div>
         )}
       </td>
 

@@ -46,6 +46,14 @@ export interface StockPriceResult {
   tradeVolume: number | null;
   market: 'TWSE' | 'TPEX' | null;  // 上市/上櫃
   error?: string;
+  // 52 周新高相關
+  is52WeekHigh?: boolean;        // 是否創 52 周新高
+  week52High?: number;            // 52 周最高價
+  // 交易量相關
+  todayVolume?: number | null;    // 今日交易量
+  avg50DayVolume?: number | null; // 50 日平均交易量
+  volumeRatio?: number | null;    // 今日交易量 / 50 日平均交易量
+  isVolumeHigh?: boolean;         // 今日交易量是否大於 50 日平均的 50%
 }
 
 // 解析價格字串
@@ -61,6 +69,145 @@ const parseVolume = (volumeStr: string | undefined): number | null => {
   const volume = parseInt(volumeStr.replace(/,/g, ''), 10);
   return isNaN(volume) ? null : volume;
 };
+
+// FinMind API 歷史資料格式
+interface FinMindData {
+  date: string;
+  stock_id: string;
+  Trading_Volume: number;
+  close: number;
+  high: number;
+  low: number;
+  open: number;
+}
+
+// 從 FinMind API 取得歷史資料
+async function fetchFinMindHistory(
+  stockCode: string,
+  startDate: string,
+  endDate: string
+): Promise<FinMindData[]> {
+  const token = process.env.FINMIND_API_TOKEN;
+  
+  if (!token) {
+    console.warn('FinMind API token 未設定，將跳過歷史資料查詢');
+    return [];
+  }
+
+  try {
+    const url = 'https://api.finmindtrade.com/api/v4/data';
+    const params = new URLSearchParams({
+      dataset: 'TaiwanStockPrice',
+      data_id: stockCode,
+      start_date: startDate,
+      end_date: endDate,
+    });
+
+    const response = await fetch(`${url}?${params.toString()}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+      },
+      next: { revalidate: 3600 }, // 快取 1 小時
+    });
+
+    if (!response.ok) {
+      console.error(`FinMind API 錯誤 (${stockCode}):`, response.statusText);
+      return [];
+    }
+
+    const result = await response.json();
+    return result.data || [];
+  } catch (error) {
+    console.error(`取得 FinMind 歷史資料失敗 (${stockCode}):`, error);
+    return [];
+  }
+}
+
+// 計算 52 周新高和 50 日平均交易量
+async function calculateAdvancedMetrics(
+  stockCode: string,
+  todayClosingPrice: number | null,
+  todayVolume: number | null
+): Promise<{
+  is52WeekHigh: boolean;
+  week52High: number | null;
+  avg50DayVolume: number | null;
+  volumeRatio: number | null;
+  isVolumeHigh: boolean;
+}> {
+  if (todayClosingPrice === null) {
+    return {
+      is52WeekHigh: false,
+      week52High: null,
+      avg50DayVolume: null,
+      volumeRatio: null,
+      isVolumeHigh: false,
+    };
+  }
+
+  // 計算日期範圍（52 周約 365 天，50 日約 70 天，考慮交易日）
+  const endDate = new Date();
+  const startDate52Weeks = new Date(endDate);
+  startDate52Weeks.setDate(startDate52Weeks.getDate() - 365);
+  const startDate50Days = new Date(endDate);
+  startDate50Days.setDate(startDate50Days.getDate() - 70);
+
+  const endDateStr = endDate.toISOString().split('T')[0];
+  const startDate52WeeksStr = startDate52Weeks.toISOString().split('T')[0];
+  const startDate50DaysStr = startDate50Days.toISOString().split('T')[0];
+
+  // 取得 52 周歷史資料
+  const history52Weeks = await fetchFinMindHistory(
+    stockCode,
+    startDate52WeeksStr,
+    endDateStr
+  );
+
+  // 取得 50 日歷史資料（用於計算平均交易量）
+  const history50Days = await fetchFinMindHistory(
+    stockCode,
+    startDate50DaysStr,
+    endDateStr
+  );
+
+  // 計算 52 周最高價
+  let week52High: number | null = null;
+  if (history52Weeks.length > 0) {
+    week52High = Math.max(...history52Weeks.map(d => d.high || 0));
+  }
+
+  // 判斷是否創 52 周新高（今日收盤價 >= 52 周最高價）
+  const is52WeekHigh = week52High !== null && todayClosingPrice >= week52High;
+
+  // 計算 50 日平均交易量
+  let avg50DayVolume: number | null = null;
+  if (history50Days.length > 0) {
+    const volumes = history50Days
+      .map(d => d.Trading_Volume)
+      .filter(v => v && v > 0);
+    if (volumes.length > 0) {
+      avg50DayVolume = volumes.reduce((sum, v) => sum + v, 0) / volumes.length;
+    }
+  }
+
+  // 計算交易量比率
+  let volumeRatio: number | null = null;
+  let isVolumeHigh = false;
+  if (todayVolume !== null && avg50DayVolume !== null && avg50DayVolume > 0) {
+    volumeRatio = todayVolume / avg50DayVolume;
+    // 今日交易量是否大於 50 日平均的 50%（即 volumeRatio >= 1.5）
+    isVolumeHigh = volumeRatio >= 1.5;
+  }
+
+  return {
+    is52WeekHigh,
+    week52High,
+    avg50DayVolume,
+    volumeRatio,
+    isVolumeHigh,
+  };
+}
 
 // GET /api/stock-price?codes=2330,2317
 export async function GET(request: NextRequest) {
@@ -118,8 +265,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 過濾出需要的股票
-    const results: StockPriceResult[] = stockCodes.map(code => {
+    // 過濾出需要的股票（先取得基本資料）
+    const basicResults: StockPriceResult[] = stockCodes.map(code => {
       // 先從 TWSE 找
       const twseStock = twseData.find(stock => stock.Code === code);
       
@@ -168,6 +315,37 @@ export async function GET(request: NextRequest) {
         error: '找不到該股票資料（可能為興櫃或已下市）',
       };
     });
+
+    // 為每支股票計算進階指標（52 周新高、50 日平均交易量）
+    const results: StockPriceResult[] = await Promise.all(
+      basicResults.map(async (result) => {
+        if (result.error || result.closingPrice === null) {
+          return result;
+        }
+
+        try {
+          const metrics = await calculateAdvancedMetrics(
+            result.stockCode,
+            result.closingPrice,
+            result.tradeVolume
+          );
+
+          return {
+            ...result,
+            is52WeekHigh: metrics.is52WeekHigh,
+            week52High: metrics.week52High,
+            todayVolume: result.tradeVolume,
+            avg50DayVolume: metrics.avg50DayVolume,
+            volumeRatio: metrics.volumeRatio,
+            isVolumeHigh: metrics.isVolumeHigh,
+          };
+        } catch (error) {
+          console.error(`計算進階指標失敗 (${result.stockCode}):`, error);
+          // 即使計算失敗，也返回基本資料
+          return result;
+        }
+      })
+    );
 
     return NextResponse.json({
       success: true,

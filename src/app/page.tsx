@@ -5,6 +5,7 @@ import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
 import DataModal from '@/components/DataModal';
 import PositionsTable from '@/components/PositionsTable';
+import StrongStocksPanel from '@/components/StrongStocksPanel';
 import type { Trade, Position } from '@/lib/types';
 
 const ACCOUNT_ID = 'cmj47funv00007jwbtrkd22t9';
@@ -189,6 +190,9 @@ export default function HomePage() {
                 )}
               </button>
             </div>
+
+            {/* 強勢股區塊 */}
+            <StrongStocksPanel onMessage={showMessage} />
 
             {/* 持倉部位 */}
             <PositionsTable 

@@ -46,6 +46,14 @@ export interface StockPrice {
   change: number | null;
   market: 'TWSE' | 'TPEX' | null;
   error?: string;
+  // 52 周新高相關
+  is52WeekHigh?: boolean;        // 是否創 52 周新高
+  week52High?: number;            // 52 周最高價
+  // 交易量相關
+  todayVolume?: number | null;    // 今日交易量
+  avg50DayVolume?: number | null; // 50 日平均交易量
+  volumeRatio?: number | null;    // 今日交易量 / 50 日平均交易量
+  isVolumeHigh?: boolean;         // 今日交易量是否大於 50 日平均的 50%
 }
 
 // ===== 追蹤停損相關 =====

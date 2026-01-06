@@ -161,23 +161,23 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
 
                   {/* 52 周高 */}
                   <td className="text-right py-3 px-4 text-gray-400">
-                    {stock.week52High.toLocaleString()}
+                    {stock.week52High && stock.week52High.toLocaleString()}
                   </td>
 
                   {/* 量比 */}
                   <td className="text-right py-3 px-4">
                     <span
                       className={`font-semibold ${
-                        stock.volumeRatio >= 2
+                        stock.volumeRatio && stock.volumeRatio >= 2
                           ? 'text-purple-400'
-                          : stock.volumeRatio >= 1.5
+                          : stock.volumeRatio && stock.volumeRatio >= 1.5
                           ? 'text-green-400'
                           : 'text-gray-400'
                       }`}
                     >
-                      {stock.volumeRatio.toFixed(2)}x
+                      {stock.volumeRatio && stock.volumeRatio.toFixed(2)}x
                     </span>
-                  </td>
+                  </td> 
 
                   {/* 標記 */}
                   <td className="text-center py-3 px-4">

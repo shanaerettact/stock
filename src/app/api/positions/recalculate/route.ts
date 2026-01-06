@@ -52,13 +52,14 @@ async function recalculatePosition(positionId: string) {
   const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
   const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
 
-  // 如果 plannedStopLoss 為空，根據買入資訊自動計算
+  // 根據買入資訊計算停損
   // 停損價 = 成本價 × 90%（容忍 10% 虧損）
-  // 預計停損金額 = (成本價 - 停損價) × 總股數 = 成本價 × 10% × 總股數
-  let plannedStopLoss = position?.plannedStopLoss;
+  // 預計停損金額 = (成本價 - 停損價) × 總買入股數 = 成本價 × 10% × 總買入股數
   let stopLossPrice = position?.stopLossPrice;
+  let plannedStopLoss = position?.plannedStopLoss;
   
-  if (!plannedStopLoss && avgEntryPrice > 0 && totalBuyQuantity > 0) {
+  // 總是重新計算停損金額（使用實際買入股數，不是剩餘股數）
+  if (avgEntryPrice > 0 && totalBuyQuantity > 0) {
     stopLossPrice = Math.round(avgEntryPrice * 0.9 * 100) / 100;
     plannedStopLoss = Math.round((avgEntryPrice - stopLossPrice) * totalBuyQuantity);
   }
@@ -205,6 +206,7 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
 
 
 

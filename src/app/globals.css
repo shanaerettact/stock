@@ -2,17 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 全域樣式 */
+/* 全域樣式 - 深色主題 */
 :root {
-  --foreground: #0a0a0a;
-  --background: #ffffff;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground: #ededed;
-    --background: #0a0a0a;
-  }
+  --foreground: #e5e5e5;
+  --background: #0f0f0f;
+  --card-bg: #1a1a1a;
+  --card-border: #2a2a2a;
+  --hover-bg: #252525;
 }
 
 body {
@@ -22,18 +18,18 @@ body {
     'Helvetica Neue', Arial, 'Noto Sans TC', sans-serif;
 }
 
-/* 自定義捲軸樣式 */
+/* 自定義捲軸樣式 - 深色 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: #1a1a1a;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #888;
+  background: #444;
   border-radius: 4px;
 }
 
@@ -48,7 +44,7 @@ body {
   }
 
   .btn-secondary {
-    @apply bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-md transition-colors;
+    @apply bg-gray-700 hover:bg-gray-600 text-gray-200 font-semibold py-2 px-4 rounded-md transition-colors;
   }
 
   .btn-danger {
@@ -56,35 +52,36 @@ body {
   }
 
   .input-field {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900;
+    @apply w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100;
   }
   
-  /* 增強輸入框文字對比度 */
+  /* 深色模式輸入框樣式 */
   input[type="text"],
   input[type="number"],
   input[type="date"],
   select {
-    @apply text-gray-900;
+    @apply bg-gray-800 text-gray-100 border-gray-600;
+    color-scheme: dark;
   }
   
   input::placeholder {
-    @apply text-gray-400;
+    @apply text-gray-500;
   }
 
   .card {
-    @apply bg-white rounded-lg shadow-md p-6;
+    @apply bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800;
   }
 
   .stat-card {
-    @apply bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200;
+    @apply bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-4 border border-gray-700;
   }
 
   .positive {
-    @apply text-green-600 font-semibold;
+    @apply text-green-500 font-semibold;
   }
 
   .negative {
-    @apply text-red-600 font-semibold;
+    @apply text-red-500 font-semibold;
   }
 }
 

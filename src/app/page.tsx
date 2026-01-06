@@ -109,6 +109,30 @@ export default function HomePage() {
     setShowForm(false);
   };
 
+  // 更新初始資金
+  const handleUpdateCapital = async (newCapital: number) => {
+    try {
+      const response = await fetch('/api/account', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initialCapital: newCapital }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '更新失敗');
+      }
+
+      const data = await response.json();
+      setInitialCapital(data.initialCapital);
+      setAccountBalance(data.currentBalance);
+      showMessage('success', '✅ 初始資金已更新！');
+    } catch (error) {
+      showMessage('error', error instanceof Error ? error.message : '更新初始資金失敗');
+      throw error;
+    }
+  };
+
   // 重新計算所有部位
   const handleRecalculatePositions = async () => {
     try {
@@ -140,10 +164,10 @@ export default function HomePage() {
   return (
     <main className="min-h-screen">
       {/* 頁首 */}
-      <header className="bg-gradient-to-r from-blue-600 to-blue-800 text-white shadow-lg">
+      <header className="bg-gradient-to-r from-gray-900 to-gray-800 text-white shadow-lg border-b border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <h1 className="text-4xl font-bold mb-2">📈 股票交易統計系統</h1>
-          <p className="text-blue-100 text-lg">專業的交易記錄與績效分析平台</p>
+          <p className="text-gray-400 text-lg">專業的交易記錄與績效分析平台</p>
         </div>
       </header>
 
@@ -153,8 +177,8 @@ export default function HomePage() {
         {message && (
           <div className={`mb-6 p-4 rounded-lg ${
             message.type === 'success'
-              ? 'bg-green-50 border border-green-200 text-green-800'
-              : 'bg-red-50 border border-red-200 text-red-800'
+              ? 'bg-green-900/50 border border-green-700 text-green-300'
+              : 'bg-red-900/50 border border-red-700 text-red-300'
           }`}>
             {message.text}
           </div>
@@ -175,7 +199,7 @@ export default function HomePage() {
               <button
                 onClick={handleRecalculatePositions}
                 disabled={recalculating}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors text-sm"
+                className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-gray-200 font-medium rounded-lg transition-colors text-sm border border-gray-600"
               >
                 {recalculating ? (
                   <>
@@ -197,6 +221,7 @@ export default function HomePage() {
             {/* 持倉部位 */}
             <PositionsTable 
               positions={positions} 
+              initialCapital={initialCapital}
               onMessage={showMessage}
             />
 
@@ -228,6 +253,7 @@ export default function HomePage() {
                 positions={positions}
                 accountBalance={accountBalance}
                 initialCapital={initialCapital}
+                onUpdateCapital={handleUpdateCapital}
               />
             )}
 
@@ -235,7 +261,7 @@ export default function HomePage() {
             <div className="flex justify-center">
               <button
                 onClick={() => setShowForm(true)}
-                className="w-full max-w-md bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition-colors text-lg"
+                className="w-full max-w-md bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition-colors text-lg"
               >
                 ➕ 新增交易記錄
               </button>
@@ -251,8 +277,8 @@ export default function HomePage() {
 
         {/* 交易表單 */}
         {showForm && (
-          <div className="bg-white rounded-lg shadow-xl p-8">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">
+          <div className="bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-700">
+            <h2 className="text-2xl font-bold text-gray-100 mb-6">
               {editingTrade ? '✏️ 編輯交易記錄' : '📝 新增交易記錄'}
             </h2>
             <TradeForm
@@ -277,7 +303,7 @@ export default function HomePage() {
       </div>
 
       {/* 頁尾 */}
-      <footer className="bg-gray-800 text-gray-300 mt-16">
+      <footer className="bg-gray-950 text-gray-400 mt-16 border-t border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center">
           <p>© 2024 股票交易統計系統 - 祝您交易順利，穩定獲利！📈</p>
         </div>
@@ -290,14 +316,14 @@ export default function HomePage() {
 
 function StatCard({ label, value, unit, color }: { label: string; value: number; unit: string; color: 'blue' | 'orange' | 'green' }) {
   const colorClass = {
-    blue: 'text-blue-600',
-    orange: 'text-orange-600',
-    green: 'text-green-600',
+    blue: 'text-blue-400',
+    orange: 'text-orange-400',
+    green: 'text-green-400',
   }[color];
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <div className="text-sm text-gray-600 mb-1">{label}</div>
+    <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
+      <div className="text-sm text-gray-400 mb-1">{label}</div>
       <div className={`text-3xl font-bold ${colorClass}`}>{value}</div>
       <div className="text-xs text-gray-500 mt-1">{unit}</div>
     </div>
@@ -311,57 +337,57 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId }: {
   deletingTradeId: string | null;
 }) {
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <h2 className="text-2xl font-bold text-gray-800 mb-4">📝 最近交易記錄</h2>
+    <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
+      <h2 className="text-2xl font-bold text-gray-100 mb-4">📝 最近交易記錄</h2>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b">
-              <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">日期</th>
-              <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">股票</th>
-              <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">類型</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">價格</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">數量</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">成交金額</th>
-              <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">操作</th>
+            <tr className="border-b border-gray-700">
+              <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">日期</th>
+              <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">股票</th>
+              <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">類型</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">價格</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">數量</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">成交金額</th>
+              <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">操作</th>
             </tr>
           </thead>
           <tbody>
             {trades.slice(0, 10).map((trade) => (
-              <tr key={trade.id} className="border-b hover:bg-gray-50">
-                <td className="py-3 px-4 text-sm text-gray-600">
+              <tr key={trade.id} className="border-b border-gray-800 hover:bg-gray-800/50">
+                <td className="py-3 px-4 text-sm text-gray-400">
                   {new Date(trade.tradeDate).toLocaleDateString('zh-TW')}
                 </td>
                 <td className="py-3 px-4">
-                  <div className="font-semibold text-gray-900">{trade.stockCode}</div>
-                  {trade.stockName && <div className="text-sm text-gray-600">{trade.stockName}</div>}
+                  <div className="font-semibold text-gray-200">{trade.stockCode}</div>
+                  {trade.stockName && <div className="text-sm text-gray-500">{trade.stockName}</div>}
                 </td>
                 <td className="text-center py-3 px-4">
                   <span className={`px-2 py-1 rounded text-sm font-semibold ${
-                    trade.tradeType === 'BUY' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    trade.tradeType === 'BUY' ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'
                   }`}>
                     {trade.tradeType === 'BUY' ? '買進' : '賣出'}
                   </span>
                 </td>
-                <td className="text-right py-3 px-4 text-gray-900">{trade.price.toLocaleString('zh-TW')} 元</td>
-                <td className="text-right py-3 px-4 text-gray-900">
+                <td className="text-right py-3 px-4 text-gray-200">{trade.price.toLocaleString('zh-TW')} 元</td>
+                <td className="text-right py-3 px-4 text-gray-200">
                   {trade.quantity} {trade.unit === 'SHARES' ? '股' : '張'}
                 </td>
-                <td className="text-right py-3 px-4 font-semibold text-gray-900">
+                <td className="text-right py-3 px-4 font-semibold text-gray-200">
                   {trade.amount.toLocaleString('zh-TW')} 元
                 </td>
                 <td className="text-center py-3 px-4">
                   <div className="flex items-center justify-center gap-2">
                     <button
                       onClick={() => onEdit(trade)}
-                      className="text-blue-600 hover:text-blue-800 font-medium text-sm px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                      className="text-blue-400 hover:text-blue-300 font-medium text-sm px-2 py-1 rounded hover:bg-blue-900/30 transition-colors"
                     >
                       ✏️ 編輯
                     </button>
                     <button
                       onClick={() => onDelete(trade.id)}
                       disabled={deletingTradeId === trade.id}
-                      className="text-red-600 hover:text-red-800 font-medium text-sm px-2 py-1 rounded hover:bg-red-50 transition-colors disabled:opacity-50"
+                      className="text-red-400 hover:text-red-300 font-medium text-sm px-2 py-1 rounded hover:bg-red-900/30 transition-colors disabled:opacity-50"
                     >
                       {deletingTradeId === trade.id ? '⏳' : '🗑️'} 刪除
                     </button>
@@ -373,7 +399,7 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId }: {
         </table>
       </div>
       {trades.length > 10 && (
-        <div className="mt-4 text-center text-sm text-gray-600">
+        <div className="mt-4 text-center text-sm text-gray-500">
           顯示最近 10 筆，共 {trades.length} 筆交易記錄
         </div>
       )}
@@ -383,10 +409,10 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId }: {
 
 function EmptyState() {
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-lg p-8 text-center">
+    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-8 text-center">
       <div className="text-6xl mb-4">📊</div>
-      <h3 className="text-xl font-semibold text-blue-900 mb-2">尚無交易記錄</h3>
-      <p className="text-blue-700 mb-4">點擊下方按鈕開始記錄您的第一筆交易</p>
+      <h3 className="text-xl font-semibold text-gray-200 mb-2">尚無交易記錄</h3>
+      <p className="text-gray-400 mb-4">點擊下方按鈕開始記錄您的第一筆交易</p>
     </div>
   );
 }
@@ -402,20 +428,20 @@ function FeatureCards({ onSelect }: { onSelect: (feature: 'trades' | 'performanc
   ] as const;
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-8">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">🎯 核心功能</h2>
-      <p className="text-gray-600 mb-6 text-sm">點擊功能卡片查看詳細說明</p>
+    <div className="bg-gray-900 rounded-lg shadow-md p-8 border border-gray-800">
+      <h2 className="text-2xl font-bold text-gray-100 mb-6">🎯 核心功能</h2>
+      <p className="text-gray-400 mb-6 text-sm">點擊功能卡片查看詳細說明</p>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {features.map((f) => (
           <button
             key={f.key}
             onClick={() => onSelect(f.key)}
-            className="bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 rounded-lg p-6 border border-blue-200 hover:border-blue-300 transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1 text-left w-full"
+            className="bg-gradient-to-br from-gray-800 to-gray-850 hover:from-gray-700 hover:to-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1 text-left w-full"
           >
             <div className="text-4xl mb-3">{f.icon}</div>
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">{f.title}</h3>
-            <p className="text-gray-600 text-sm mb-3">{f.desc}</p>
-            <div className="text-blue-600 text-xs font-semibold flex items-center gap-1">
+            <h3 className="text-lg font-semibold text-gray-200 mb-2">{f.title}</h3>
+            <p className="text-gray-400 text-sm mb-3">{f.desc}</p>
+            <div className="text-blue-400 text-xs font-semibold flex items-center gap-1">
               點擊查看詳情
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -437,17 +463,17 @@ function QuickStartGuide() {
   ];
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-8">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">🚀 快速開始</h2>
-      <div className="space-y-4 text-gray-700">
+    <div className="bg-gray-900 rounded-lg shadow-md p-8 border border-gray-800">
+      <h2 className="text-2xl font-bold text-gray-100 mb-6">🚀 快速開始</h2>
+      <div className="space-y-4 text-gray-300">
         {steps.map((step) => (
           <div key={step.num} className="flex gap-4">
             <div className="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
               {step.num}
             </div>
             <div>
-              <h4 className="font-semibold text-gray-800 mb-1">{step.title}</h4>
-              <p className="text-gray-600 text-sm">{step.desc}</p>
+              <h4 className="font-semibold text-gray-200 mb-1">{step.title}</h4>
+              <p className="text-gray-400 text-sm">{step.desc}</p>
             </div>
           </div>
         ))}
@@ -458,11 +484,11 @@ function QuickStartGuide() {
 
 function TechInfo() {
   return (
-    <div className="bg-gray-100 rounded-lg p-6 text-sm text-gray-600">
+    <div className="bg-gray-800/50 rounded-lg p-6 text-sm text-gray-400 border border-gray-700">
       <p className="mb-2">
-        <strong>技術架構：</strong> Next.js 14 + Prisma + SQLite + TypeScript + Tailwind CSS
+        <strong className="text-gray-300">技術架構：</strong> Next.js 14 + Prisma + SQLite + TypeScript + Tailwind CSS
       </p>
-      <p className="mb-2"><strong>API 路由：</strong></p>
+      <p className="mb-2"><strong className="text-gray-300">API 路由：</strong></p>
       <ul className="list-disc list-inside ml-4 space-y-1">
         <li>POST /api/trades - 新增交易</li>
         <li>GET /api/trades - 查詢交易</li>

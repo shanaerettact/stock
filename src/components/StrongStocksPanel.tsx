@@ -41,11 +41,11 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
+    <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
       <div className="flex justify-between items-center mb-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">🔥 今日強勢股</h2>
-          <p className="text-sm text-gray-600 mt-1">
+          <h2 className="text-2xl font-bold text-gray-100">🔥 今日強勢股</h2>
+          <p className="text-sm text-gray-400 mt-1">
             篩選條件：創 52 周新高 + 交易量大於 50 日均量 50%
           </p>
         </div>
@@ -59,7 +59,7 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
           <button
             onClick={fetchStrongStocks}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-medium rounded-lg transition-colors text-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 text-white font-medium rounded-lg transition-colors text-sm"
           >
             {loading ? (
               <>
@@ -94,9 +94,9 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
 
       {/* 說明區塊 */}
       {stocks.length === 0 && !loading && (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
+        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6 text-center">
           <div className="text-4xl mb-3">📊</div>
-          <p className="text-gray-600 mb-2">點擊「搜尋強勢股」按鈕</p>
+          <p className="text-gray-400 mb-2">點擊「搜尋強勢股」按鈕</p>
           <p className="text-sm text-gray-500">
             系統將自動篩選出當日漲幅前列、創 52 周新高、且交易量放大的股票
           </p>
@@ -108,30 +108,30 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b bg-gray-50">
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">排名</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">股票</th>
-                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">收盤價</th>
-                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">漲幅</th>
-                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">52周高</th>
-                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">量比</th>
-                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">標記</th>
-                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">技術圖</th>
+              <tr className="border-b border-gray-700 bg-gray-800/50">
+                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">排名</th>
+                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">股票</th>
+                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">收盤價</th>
+                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">漲幅</th>
+                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">52周高</th>
+                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">量比</th>
+                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">標記</th>
+                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">技術圖</th>
               </tr>
             </thead>
             <tbody>
               {stocks.map((stock, index) => (
                 <tr
                   key={stock.stockCode}
-                  className="border-b hover:bg-yellow-50 transition-colors"
+                  className="border-b border-gray-800 hover:bg-yellow-900/20 transition-colors"
                 >
                   {/* 排名 */}
                   <td className="py-3 px-4">
                     <span
                       className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-sm font-bold ${
                         index < 3
-                          ? 'bg-yellow-400 text-yellow-900'
-                          : 'bg-gray-200 text-gray-700'
+                          ? 'bg-yellow-600 text-yellow-100'
+                          : 'bg-gray-700 text-gray-300'
                       }`}
                     >
                       {index + 1}
@@ -140,29 +140,18 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
 
                   {/* 股票資訊 */}
                   <td className="py-3 px-4">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-gray-900">{stock.stockCode}</span>
-                      {'market' in stock && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${
-                          stock.market === 'TWSE'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-purple-100 text-purple-700'
-                        }`}>
-                          {stock.market === 'TWSE' ? '上市' : '上櫃'}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-600">{stock.stockName}</div>
+                    <div className="font-semibold text-gray-200">{stock.stockCode}</div>
+                    <div className="text-sm text-gray-500">{stock.stockName}</div>
                   </td>
 
                   {/* 收盤價 */}
-                  <td className="text-right py-3 px-4 font-semibold text-gray-900">
+                  <td className="text-right py-3 px-4 font-semibold text-gray-200">
                     {stock.closingPrice.toLocaleString()} 元
                   </td>
 
                   {/* 漲幅 */}
                   <td className="text-right py-3 px-4">
-                    <div className="text-red-600 font-bold">
+                    <div className="text-red-400 font-bold">
                       +{stock.changePercent.toFixed(2)}%
                     </div>
                     <div className="text-xs text-red-500">
@@ -171,7 +160,7 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
                   </td>
 
                   {/* 52 周高 */}
-                  <td className="text-right py-3 px-4 text-gray-700">
+                  <td className="text-right py-3 px-4 text-gray-400">
                     {stock.week52High.toLocaleString()}
                   </td>
 
@@ -180,10 +169,10 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
                     <span
                       className={`font-semibold ${
                         stock.volumeRatio >= 2
-                          ? 'text-purple-600'
+                          ? 'text-purple-400'
                           : stock.volumeRatio >= 1.5
-                          ? 'text-green-600'
-                          : 'text-gray-600'
+                          ? 'text-green-400'
+                          : 'text-gray-400'
                       }`}
                     >
                       {stock.volumeRatio.toFixed(2)}x
@@ -193,10 +182,10 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
                   {/* 標記 */}
                   <td className="text-center py-3 px-4">
                     <div className="flex flex-wrap justify-center gap-1">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-900/50 text-yellow-400">
                         🎯 新高
                       </span>
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-900/50 text-green-400">
                         📈 量增
                       </span>
                     </div>
@@ -208,7 +197,7 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
                       href={`https://tw.stock.yahoo.com/quote/${stock.stockCode}/technical-analysis`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded text-sm font-medium transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-blue-900/50 hover:bg-blue-800/50 text-blue-400 rounded text-sm font-medium transition-colors"
                     >
                       📊 查看
                     </a>
@@ -228,7 +217,7 @@ export default function StrongStocksPanel({ onMessage }: StrongStocksPanelProps)
             href="https://finmind.github.io/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:underline ml-1"
+            className="text-blue-400 hover:underline ml-1"
           >
             FinMind API
           </a>

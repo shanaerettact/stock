@@ -6,15 +6,23 @@ import { calculateTrailingStop, calculateUnrealizedPnL } from '@/lib/types';
 
 interface PositionsTableProps {
   positions: Position[];
+  initialCapital?: number;
   onMessage?: (type: 'success' | 'error', text: string) => void;
 }
 
-export default function PositionsTable({ positions, onMessage }: PositionsTableProps) {
+export default function PositionsTable({ positions, initialCapital = 100000, onMessage }: PositionsTableProps) {
   const [stockPrices, setStockPrices] = useState<Record<string, StockPrice>>({});
   const [fetchingPrices, setFetchingPrices] = useState(false);
   const [pricesFetchedAt, setPricesFetchedAt] = useState<string | null>(null);
 
   const openPositions = positions.filter(p => p.status === 'OPEN');
+  
+  // 計算總持倉成本和佔比 - 使用 totalInvested（含手續費）
+  const totalHoldingCost = openPositions.reduce((sum, p) => {
+    // 優先使用 totalInvested（含手續費），否則用成交金額估算
+    return sum + ((p as { totalInvested?: number }).totalInvested ?? (p.avgEntryPrice * p.totalQuantity));
+  }, 0);
+  const holdingPercent = (totalHoldingCost / initialCapital) * 100;
 
   const fetchStockPrices = async () => {
     if (openPositions.length === 0) {
@@ -56,10 +64,20 @@ export default function PositionsTable({ positions, onMessage }: PositionsTableP
     return null;
   }
 
+  // 決定持倉佔比的顏色和等級
+  const getHoldingStatus = () => {
+    if (holdingPercent > 80) return { color: 'red', bg: 'bg-red-500', text: 'text-red-400', label: '過高', icon: '🔴' };
+    if (holdingPercent > 50) return { color: 'yellow', bg: 'bg-yellow-500', text: 'text-yellow-400', label: '偏高', icon: '🟡' };
+    if (holdingPercent > 30) return { color: 'blue', bg: 'bg-blue-500', text: 'text-blue-400', label: '適中', icon: '🔵' };
+    return { color: 'green', bg: 'bg-green-500', text: 'text-green-400', label: '安全', icon: '🟢' };
+  };
+  const holdingStatus = getHoldingStatus();
+
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
+    <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
+      {/* 標題與操作按鈕 */}
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">📊 目前持倉</h2>
+        <h2 className="text-2xl font-bold text-gray-100">📊 目前持倉</h2>
         <div className="flex items-center gap-3">
           {pricesFetchedAt && (
             <span className="text-sm text-gray-500">更新時間：{pricesFetchedAt}</span>
@@ -67,7 +85,7 @@ export default function PositionsTable({ positions, onMessage }: PositionsTableP
           <button
             onClick={fetchStockPrices}
             disabled={fetchingPrices}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium rounded-lg transition-colors text-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-medium rounded-lg transition-colors text-sm"
           >
             {fetchingPrices ? (
               <>
@@ -84,18 +102,86 @@ export default function PositionsTable({ positions, onMessage }: PositionsTableP
         </div>
       </div>
 
+      {/* 持倉總覽 - 顯眼的佔比顯示 */}
+      <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          {/* 左側：持倉成本 */}
+          <div className="flex items-center gap-4">
+            <div>
+              <div className="text-sm text-gray-400 mb-1">總持倉成本</div>
+              <div className="text-2xl font-bold text-white">
+                {Math.round(totalHoldingCost).toLocaleString()} <span className="text-lg text-gray-400">元</span>
+              </div>
+            </div>
+            <div className="text-3xl text-gray-600">|</div>
+            <div>
+              <div className="text-sm text-gray-400 mb-1">投資預算</div>
+              <div className="text-xl font-semibold text-gray-300">
+                {initialCapital.toLocaleString()} <span className="text-sm text-gray-400">元</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 右側：佔比圓圈 */}
+          <div className="flex items-center gap-4">
+            {/* 佔比進度條 */}
+            <div className="flex-1 md:w-48">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-sm text-gray-400">資金使用率</span>
+                <span className={`text-sm font-semibold ${holdingStatus.text}`}>
+                  {holdingStatus.icon} {holdingStatus.label}
+                </span>
+              </div>
+              <div className="h-4 bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full ${holdingStatus.bg} transition-all duration-700 ease-out`}
+                  style={{ width: `${Math.min(holdingPercent, 100)}%` }}
+                />
+              </div>
+            </div>
+
+            {/* 佔比數字 */}
+            <div className={`text-center px-4 py-2 rounded-xl border-2 ${
+              holdingPercent > 80 ? 'border-red-500 bg-red-900/30' :
+              holdingPercent > 50 ? 'border-yellow-500 bg-yellow-900/30' :
+              holdingPercent > 30 ? 'border-blue-500 bg-blue-900/30' :
+              'border-green-500 bg-green-900/30'
+            }`}>
+              <div className={`text-3xl font-bold ${holdingStatus.text}`}>
+                {holdingPercent.toFixed(1)}%
+              </div>
+              <div className="text-xs text-gray-400">佔投資預算</div>
+            </div>
+          </div>
+        </div>
+
+        {/* 風險提示 */}
+        {holdingPercent > 50 && (
+          <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${
+            holdingPercent > 80 
+              ? 'bg-red-900/40 border border-red-700 text-red-300'
+              : 'bg-yellow-900/40 border border-yellow-700 text-yellow-300'
+          }`}>
+            {holdingPercent > 80 
+              ? '⚠️ 持倉比例過高！建議適度減倉以降低風險'
+              : '💡 持倉比例偏高，請注意資金配置與風險控管'
+            }
+          </div>
+        )}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b">
-              <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">股票</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">股數</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">成本價</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">今日收盤</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">漲跌</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">未實現損益</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">停損價</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">狀態</th>
+            <tr className="border-b border-gray-700">
+              <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">股票</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">股數</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">成本價</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">今日收盤</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">漲跌</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">未實現損益</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">停損價</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">狀態</th>
             </tr>
           </thead>
           <tbody>
@@ -103,7 +189,8 @@ export default function PositionsTable({ positions, onMessage }: PositionsTableP
               <PositionRow 
                 key={position.id} 
                 position={position} 
-                priceData={stockPrices[position.stockCode]} 
+                priceData={stockPrices[position.stockCode]}
+                initialCapital={initialCapital}
               />
             ))}
           </tbody>
@@ -113,9 +200,9 @@ export default function PositionsTable({ positions, onMessage }: PositionsTableP
       {Object.keys(stockPrices).length > 0 && (
         <div className="mt-4 text-xs text-gray-500 text-right">
           資料來源：
-          <a href="https://openapi.twse.com.tw/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline ml-1">TWSE OpenAPI</a>
+          <a href="https://openapi.twse.com.tw/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline ml-1">TWSE OpenAPI</a>
           {'、'}
-          <a href="https://finmind.github.io/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">FinMind API</a>
+          <a href="https://finmind.github.io/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">FinMind API</a>
         </div>
       )}
     </div>
@@ -123,7 +210,7 @@ export default function PositionsTable({ positions, onMessage }: PositionsTableP
 }
 
 // 單一持倉列元件
-function PositionRow({ position, priceData }: { position: Position; priceData?: StockPrice }) {
+function PositionRow({ position, priceData, initialCapital }: { position: Position; priceData?: StockPrice; initialCapital: number }) {
   const closingPrice = priceData?.closingPrice;
   const change = priceData?.change;
   
@@ -142,17 +229,21 @@ function PositionRow({ position, priceData }: { position: Position; priceData?: 
     position.totalQuantity
   );
 
+  // 計算該股票佔投資預算的百分比 - 使用 totalInvested（含手續費）
+  const positionCost = (position as { totalInvested?: number }).totalInvested ?? (position.avgEntryPrice * position.totalQuantity);
+  const positionPercent = (positionCost / initialCapital) * 100;
+
   return (
-    <tr className="border-b hover:bg-gray-50">
+    <tr className="border-b border-gray-800 hover:bg-gray-800/50">
       {/* 股票資訊 */}
       <td className="py-3 px-4">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-gray-900">{position.stockCode}</span>
+          <span className="font-semibold text-gray-200">{position.stockCode}</span>
           <a
             href={`https://tw.stock.yahoo.com/quote/${position.stockCode}/technical-analysis`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 transition-colors"
+            className="text-blue-400 hover:text-blue-300 transition-colors"
             title="查看技術分析圖"
           >
             <svg 
@@ -172,12 +263,12 @@ function PositionRow({ position, priceData }: { position: Position; priceData?: 
           </a>
         </div>
         {position.stockName && (
-          <div className="text-sm text-gray-600">{position.stockName}</div>
+          <div className="text-sm text-gray-500">{position.stockName}</div>
         )}
         {/* 52 周新高提示 */}
         {priceData?.is52WeekHigh && (
           <div className="mt-1 flex items-center gap-1">
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-900/50 text-yellow-400">
               🎯 52周新高
             </span>
           </div>
@@ -185,7 +276,7 @@ function PositionRow({ position, priceData }: { position: Position; priceData?: 
         {/* 交易量提示 */}
         {priceData?.isVolumeHigh && priceData?.volumeRatio && (
           <div className="mt-1 flex items-center gap-1">
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-900/50 text-green-400">
               📈 量增 {((priceData.volumeRatio - 1) * 100).toFixed(0)}%
             </span>
           </div>
@@ -193,12 +284,12 @@ function PositionRow({ position, priceData }: { position: Position; priceData?: 
       </td>
 
       {/* 股數 */}
-      <td className="text-right py-3 px-4 text-gray-900">
+      <td className="text-right py-3 px-4 text-gray-200">
         {position.totalQuantity.toLocaleString()} 股
       </td>
 
       {/* 成本價 */}
-      <td className="text-right py-3 px-4 text-gray-900">
+      <td className="text-right py-3 px-4 text-gray-200">
         {position.avgEntryPrice.toLocaleString()} 元
       </td>
 
@@ -222,11 +313,20 @@ function PositionRow({ position, priceData }: { position: Position; priceData?: 
         <StopLossCell trailingStop={trailingStop} originalStopLoss={originalStopLoss} />
       </td>
 
-      {/* 狀態 */}
+      {/* 狀態與佔比 */}
       <td className="text-right py-3 px-4">
-        <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded text-sm font-semibold">
-          持倉中
-        </span>
+        <div className="flex flex-col items-end gap-1">
+          <span className="px-2 py-1 bg-orange-900/50 text-orange-400 rounded text-sm font-semibold">
+            持倉中
+          </span>
+          <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+            positionPercent > 20 ? 'bg-red-900/50 text-red-400' :
+            positionPercent > 10 ? 'bg-yellow-900/50 text-yellow-400' :
+            'bg-green-900/50 text-green-400'
+          }`}>
+            佔 {positionPercent.toFixed(1)}%
+          </span>
+        </div>
       </td>
     </tr>
   );
@@ -237,14 +337,14 @@ function ClosingPriceCell({ closingPrice, priceData }: { closingPrice?: number |
   if (closingPrice !== null && closingPrice !== undefined) {
     return (
       <div>
-        <span className="font-semibold text-gray-900">
+        <span className="font-semibold text-gray-200">
           {closingPrice.toLocaleString()} 元
         </span>
         {priceData?.market && (
           <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
             priceData.market === 'TWSE' 
-              ? 'bg-blue-100 text-blue-700' 
-              : 'bg-purple-100 text-purple-700'
+              ? 'bg-blue-900/50 text-blue-400' 
+              : 'bg-purple-900/50 text-purple-400'
           }`}>
             {priceData.market === 'TWSE' ? '上市' : '上櫃'}
           </span>
@@ -254,22 +354,22 @@ function ClosingPriceCell({ closingPrice, priceData }: { closingPrice?: number |
   }
   
   if (priceData?.error) {
-    return <span className="text-red-500 text-sm">{priceData.error}</span>;
+    return <span className="text-red-400 text-sm">{priceData.error}</span>;
   }
   
-  return <span className="text-gray-400 text-sm">--</span>;
+  return <span className="text-gray-500 text-sm">--</span>;
 }
 
 // 漲跌欄位
 function ChangeCell({ change }: { change?: number | null }) {
   if (change !== null && change !== undefined) {
     return (
-      <span className={`font-medium ${change > 0 ? 'text-red-600' : change < 0 ? 'text-green-600' : 'text-gray-600'}`}>
+      <span className={`font-medium ${change > 0 ? 'text-red-400' : change < 0 ? 'text-green-400' : 'text-gray-400'}`}>
         {change > 0 ? '+' : ''}{change.toFixed(2)}
       </span>
     );
   }
-  return <span className="text-gray-400 text-sm">--</span>;
+  return <span className="text-gray-500 text-sm">--</span>;
 }
 
 // 未實現損益欄位
@@ -277,7 +377,7 @@ function UnrealizedPnLCell({ amount, percent }: { amount: number | null; percent
   if (amount !== null && percent !== null) {
     return (
       <div>
-        <div className={`font-semibold ${amount >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+        <div className={`font-semibold ${amount >= 0 ? 'text-red-400' : 'text-green-400'}`}>
           {amount >= 0 ? '+' : ''}{Math.round(amount).toLocaleString()} 元
         </div>
         <div className={`text-xs ${percent >= 0 ? 'text-red-500' : 'text-green-500'}`}>
@@ -286,7 +386,7 @@ function UnrealizedPnLCell({ amount, percent }: { amount: number | null; percent
       </div>
     );
   }
-  return <span className="text-gray-400 text-sm">--</span>;
+  return <span className="text-gray-500 text-sm">--</span>;
 }
 
 // 停損價欄位
@@ -296,17 +396,17 @@ function StopLossCell({ trailingStop, originalStopLoss }: { trailingStop: Traili
       <div>
         <div className={`font-medium ${
           trailingStop.isTriggered 
-            ? 'text-white bg-red-500 px-2 py-0.5 rounded animate-pulse' 
+            ? 'text-white bg-red-600 px-2 py-0.5 rounded animate-pulse' 
             : trailingStop.isActivated 
-              ? 'text-green-600' 
-              : 'text-red-600'
+              ? 'text-green-400' 
+              : 'text-red-400'
         }`}>
           {trailingStop.stopLossPrice.toLocaleString()} 元
         </div>
         {trailingStop.isTriggered ? (
-          <div className="text-xs text-red-600 font-semibold mt-1">⚠️ 已觸發停損</div>
+          <div className="text-xs text-red-400 font-semibold mt-1">⚠️ 已觸發停損</div>
         ) : trailingStop.isActivated ? (
-          <div className="text-xs text-green-600 mt-1 flex items-center justify-end gap-1">
+          <div className="text-xs text-green-400 mt-1 flex items-center justify-end gap-1">
             <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
             追蹤停損中
           </div>
@@ -316,7 +416,7 @@ function StopLossCell({ trailingStop, originalStopLoss }: { trailingStop: Traili
   }
   
   return (
-    <span className="text-red-600 font-medium">
+    <span className="text-red-400 font-medium">
       {originalStopLoss.toLocaleString()} 元
     </span>
   );

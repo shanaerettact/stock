@@ -7,10 +7,18 @@ interface TradeRecord {
   id: string;
   tradeType: string;
   quantity: number;
+  unit: string;
   amount: number;
   commission: number;
   tax: number;
   tradeDate: Date;
+}
+
+/**
+ * 將交易數量轉換為股數
+ */
+function convertToShares(quantity: number, unit: string): number {
+  return unit === 'LOTS' ? quantity * 1000 : quantity;
 }
 
 /**
@@ -189,16 +197,16 @@ async function updatePositionFromTrades(positionId: string) {
 
   if (trades.length === 0) return;
 
-  // 計算買入交易
+  // 計算買入交易（將數量轉換為股數）
   const buyTrades = trades.filter((t: TradeRecord) => t.tradeType === 'BUY');
-  const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.quantity, 0);
+  const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit), 0);
   const totalBuyAmount = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
   const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
 
-  // 計算賣出交易
+  // 計算賣出交易（將數量轉換為股數）
   const sellTrades = trades.filter((t: TradeRecord) => t.tradeType === 'SELL');
-  const totalSellQuantity = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.quantity, 0);
+  const totalSellQuantity = sellTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit), 0);
   const totalSellAmount = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalSellCommission = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
   const totalSellTax = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.tax, 0);

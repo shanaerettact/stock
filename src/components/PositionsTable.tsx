@@ -215,7 +215,7 @@ function PositionRow({ position, priceData, initialCapital }: { position: Positi
   const change = priceData?.change;
   
   const originalStopLoss = position.stopLossPrice || 
-    Math.round(position.avgEntryPrice * 0.9 * 100) / 100;
+    Math.round(position.avgEntryPrice * 0.92 * 100) / 100;
   
   const trailingStop = calculateTrailingStop(
     position.avgEntryPrice,

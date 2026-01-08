@@ -149,7 +149,19 @@ export default function HomePage() {
       }
 
       const result = await response.json();
-      showMessage('success', `✅ ${result.message}，已關聯 ${result.linkedTrades} 筆孤立交易`);
+      
+      // 顯示餘額重算結果
+      let balanceMsg = '';
+      if (result.balanceRecalculation?.success) {
+        const diff = result.balanceRecalculation.difference;
+        if (Math.abs(diff) > 1) {
+          balanceMsg = `，餘額已調整 ${diff >= 0 ? '+' : ''}${diff.toLocaleString()} 元`;
+        } else {
+          balanceMsg = '，餘額無需調整';
+        }
+      }
+      
+      showMessage('success', `✅ ${result.message}，已關聯 ${result.linkedTrades} 筆孤立交易${balanceMsg}`);
       loadData();
     } catch (error) {
       showMessage('error', error instanceof Error ? error.message : '重新計算失敗');
@@ -210,8 +222,8 @@ export default function HomePage() {
                     計算中...
                   </>
                 ) : (
-                  <>🔄 重新計算部位</>
-                )}
+                <>🔄 重新計算部位與餘額</>
+              )}
               </button>
             </div>
 

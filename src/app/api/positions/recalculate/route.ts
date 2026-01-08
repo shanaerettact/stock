@@ -53,14 +53,14 @@ async function recalculatePosition(positionId: string) {
   const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
 
   // 根據買入資訊計算停損
-  // 停損價 = 成本價 × 90%（容忍 10% 虧損）
-  // 預計停損金額 = (成本價 - 停損價) × 總買入股數 = 成本價 × 10% × 總買入股數
+  // 停損價 = 成本價 × 92%（容忍 8% 虧損）
+  // 預計停損金額 = (成本價 - 停損價) × 總買入股數 = 成本價 × 8% × 總買入股數
   let stopLossPrice = position?.stopLossPrice;
   let plannedStopLoss = position?.plannedStopLoss;
   
   // 總是重新計算停損金額（使用實際買入股數，不是剩餘股數）
   if (avgEntryPrice > 0 && totalBuyQuantity > 0) {
-    stopLossPrice = Math.round(avgEntryPrice * 0.9 * 100) / 100;
+    stopLossPrice = Math.round(avgEntryPrice * 0.92 * 100) / 100;
     plannedStopLoss = Math.round((avgEntryPrice - stopLossPrice) * totalBuyQuantity);
   }
 
@@ -192,11 +192,15 @@ export async function POST(request: NextRequest) {
       results.push(result);
     }
 
+    // 🔧 重新計算帳戶餘額（根據所有交易記錄）
+    const balanceResult = await recalculateAccountBalance(accountId);
+
     return NextResponse.json({
       success: true,
       message: `已重新計算 ${positions.length} 個部位`,
       linkedTrades: linkedTrades.length,
       results,
+      balanceRecalculation: balanceResult,
     });
   } catch (error) {
     console.error('重新計算部位失敗:', error);
@@ -205,6 +209,56 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * 🔧 根據所有交易記錄重新計算帳戶餘額
+ */
+async function recalculateAccountBalance(accountId: string) {
+  // 查詢帳戶資訊
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+  });
+
+  if (!account) {
+    return { success: false, error: '找不到帳戶' };
+  }
+
+  // 查詢該帳戶的所有交易記錄
+  const allTrades = await prisma.trade.findMany({
+    where: { accountId },
+    orderBy: { tradeDate: 'asc' },
+  });
+
+  // 計算正確的餘額
+  // 餘額 = 初始資金 - 買入總支出 + 賣出總收入
+  let calculatedBalance = account.initialCapital;
+
+  for (const trade of allTrades) {
+    if (trade.tradeType === 'BUY') {
+      calculatedBalance -= trade.totalCost; // 買入扣除（含手續費）
+    } else {
+      calculatedBalance += trade.totalCost; // 賣出增加（實收金額）
+    }
+  }
+
+  const oldBalance = account.currentBalance;
+  const difference = calculatedBalance - oldBalance;
+
+  // 更新帳戶餘額
+  await prisma.account.update({
+    where: { id: accountId },
+    data: { currentBalance: calculatedBalance },
+  });
+
+  return {
+    success: true,
+    initialCapital: account.initialCapital,
+    oldBalance: Math.round(oldBalance * 100) / 100,
+    newBalance: Math.round(calculatedBalance * 100) / 100,
+    difference: Math.round(difference * 100) / 100,
+    tradesCount: allTrades.length,
+  };
 }
 
 

@@ -676,7 +676,7 @@ export default function DataModal({
                       <span>成本：{position.avgEntryPrice.toLocaleString()} 元</span>
                       <span>股數：{position.totalQuantity.toLocaleString()} 股</span>
                       <span className="text-red-400 font-medium">
-                        停損：{(position.stopLossPrice || Math.round(position.avgEntryPrice * 0.9 * 100) / 100).toLocaleString()} 元
+                        停損：{(position.stopLossPrice || Math.round(position.avgEntryPrice * 0.92 * 100) / 100).toLocaleString()} 元
                       </span>
                     </div>
                   </div>
@@ -854,7 +854,7 @@ export default function DataModal({
                 <div className="bg-yellow-900/30 border border-yellow-800 rounded-lg p-4 text-sm text-left max-w-md mx-auto">
                   <h4 className="font-semibold text-yellow-400 mb-2">如何產生 R 值資料？</h4>
                   <ol className="list-decimal list-inside text-yellow-500 space-y-1">
-                    <li>新增買入交易時，系統會自動計算停損價（買入價 × 90%）</li>
+                    <li>新增買入交易時，系統會自動計算停損價（買入價 × 92%）</li>
                     <li>停損金額 = (買入價 - 停損價) × 股數</li>
                     <li>平倉後，R 值 = 實際損益 ÷ 停損金額</li>
                   </ol>

@@ -99,6 +99,34 @@ export async function PUT(
       isDayTrade,
     });
 
+    // 🔧 調整帳戶餘額差異
+    const account = await prisma.account.findUnique({
+      where: { id: existingTrade.accountId },
+    });
+
+    if (account) {
+      // 先回滾舊交易的影響
+      let balanceAdjustment = 0;
+      
+      if (existingTrade.tradeType === 'BUY') {
+        balanceAdjustment += existingTrade.totalCost; // 回滾舊買入（加回）
+      } else {
+        balanceAdjustment -= existingTrade.totalCost; // 回滾舊賣出（扣除）
+      }
+      
+      // 再套用新交易的影響
+      if (tradeType === 'BUY') {
+        balanceAdjustment -= calculation.totalCost; // 新買入（扣除）
+      } else {
+        balanceAdjustment += calculation.totalCost; // 新賣出（加回）
+      }
+
+      await prisma.account.update({
+        where: { id: existingTrade.accountId },
+        data: { currentBalance: account.currentBalance + balanceAdjustment },
+      });
+    }
+
     // 更新交易記錄
     const updatedTrade = await prisma.trade.update({
       where: { id },
@@ -156,6 +184,23 @@ export async function DELETE(
     }
 
     const positionId = existingTrade.positionId;
+
+    // 🔧 回滾帳戶餘額（刪除買入 = 加回餘額，刪除賣出 = 扣除餘額）
+    const account = await prisma.account.findUnique({
+      where: { id: existingTrade.accountId },
+    });
+
+    if (account) {
+      const balanceAdjustment =
+        existingTrade.tradeType === 'BUY'
+          ? existingTrade.totalCost  // 刪除買入，加回餘額
+          : -existingTrade.totalCost; // 刪除賣出，扣除餘額
+
+      await prisma.account.update({
+        where: { id: existingTrade.accountId },
+        data: { currentBalance: account.currentBalance + balanceAdjustment },
+      });
+    }
 
     // 刪除交易記錄
     await prisma.trade.delete({

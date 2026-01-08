@@ -97,8 +97,8 @@ export default function TradeForm({
       });
       setPreview(calculation);
       
-      // 自動計算停損價 = 買入價 × 90%（容忍 10% 虧損）
-      const autoStopLossPrice = Math.round(price * 0.9 * 100) / 100;
+      // 自動計算停損價 = 買入價 × 92%（容忍 8% 虧損）
+      const autoStopLossPrice = Math.round(price * 0.92 * 100) / 100;
       const totalShares = formData.unit === 'LOTS' ? quantity * 1000 : quantity;
       const stopLossAmount = Math.round((price - autoStopLossPrice) * totalShares);
       

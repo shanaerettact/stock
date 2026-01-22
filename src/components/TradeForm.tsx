@@ -81,6 +81,27 @@ export default function TradeForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [preview, setPreview] = useState<ReturnType<typeof calculateTrade> | null>(null);
   
+  // 當 initialData 改變時，更新表單資料（用於編輯模式）
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        stockCode: initialData.stockCode || '',
+        stockName: initialData.stockName || '',
+        tradeType: initialData.tradeType || 'BUY',
+        tradeDate: initialData.tradeDate || getDefaultDate(),
+        price: initialData.price || '',
+        quantity: initialData.quantity || '',
+        unit: initialData.unit || 'SHARES',
+        securityType: initialData.securityType || 'STOCK',
+        isDayTrade: initialData.isDayTrade || false,
+        stopLossPrice: initialData.stopLossPrice || '',
+        plannedStopLoss: initialData.plannedStopLoss || '',
+        positionId: initialData.positionId || undefined,
+      });
+      setErrors({});
+    }
+  }, [initialData]);
+  
   // 即時計算預覽與自動計算停損價（買入價 × 90%）
   useEffect(() => {
     const price = parseFloat(formData.price);

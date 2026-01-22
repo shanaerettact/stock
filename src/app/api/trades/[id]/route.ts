@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { calculateTrade, type TradeUnit } from '@/lib/tradeCalculations';
 
+// 強制動態渲染，禁止快取
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // 型別定義
 interface TradeRecord {
   id: string;
@@ -79,6 +83,12 @@ export async function PUT(
       return NextResponse.json({ error: '缺少必填欄位' }, { status: 400 });
     }
 
+    // 解析數量，確保是整數
+    const parsedQuantity = typeof quantity === 'number' ? Math.floor(quantity) : parseInt(String(quantity), 10);
+    if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+      return NextResponse.json({ error: '數量必須為正整數' }, { status: 400 });
+    }
+
     // 檢查交易記錄是否存在
     const existingTrade = await prisma.trade.findUnique({
       where: { id },
@@ -91,8 +101,8 @@ export async function PUT(
 
     // 重新計算交易費用
     const calculation = calculateTrade({
-      price: parseFloat(price),
-      quantity: parseInt(quantity),
+      price: parseFloat(String(price)),
+      quantity: parsedQuantity,
       unit: unit as TradeUnit,
       tradeType,
       securityType,
@@ -127,6 +137,124 @@ export async function PUT(
       });
     }
 
+    // 處理部位關聯變更
+    const oldPositionId = existingTrade.positionId;
+    const stockCodeChanged = existingTrade.stockCode !== stockCode;
+    const tradeTypeChanged = existingTrade.tradeType !== tradeType;
+    
+    // 如果股票代碼改變，需要解除舊部位的關聯
+    let newPositionId: string | null = null;
+    
+    if (stockCodeChanged) {
+      // 股票代碼改變，解除舊部位關聯
+      // 如果舊部位還有其他交易，需要重新計算舊部位
+      if (oldPositionId) {
+        const remainingTradesInOldPosition = await prisma.trade.count({
+          where: {
+            positionId: oldPositionId,
+            id: { not: id }, // 排除當前交易
+          },
+        });
+        
+        if (remainingTradesInOldPosition > 0) {
+          // 舊部位還有其他交易，重新計算舊部位
+          await updatePositionFromTrades(oldPositionId);
+        } else {
+          // 舊部位沒有其他交易了，刪除舊部位
+          await prisma.position.delete({
+            where: { id: oldPositionId },
+          });
+        }
+      }
+      
+      // 為新股票代碼查找或創建部位（僅限買入交易）
+      if (tradeType === 'BUY') {
+        const existingPosition = await prisma.position.findFirst({
+          where: {
+            accountId: existingTrade.accountId,
+            stockCode,
+            status: 'OPEN',
+          },
+          orderBy: { entryDate: 'desc' },
+        });
+        
+        if (existingPosition) {
+          newPositionId = existingPosition.id;
+        } else {
+          // 創建新部位
+          const newPosition = await prisma.position.create({
+            data: {
+              accountId: existingTrade.accountId,
+              stockCode,
+              stockName: stockName || null,
+              status: 'OPEN',
+              entryDate: new Date(tradeDate),
+              avgEntryPrice: parseFloat(price),
+              totalQuantity: calculation.totalShares,
+              totalInvested: calculation.totalCost,
+              totalCommission: calculation.commission,
+            },
+          });
+          newPositionId = newPosition.id;
+        }
+      }
+    } else {
+      // 股票代碼未改變
+      if (tradeType === 'BUY') {
+        // 買入交易，查找或創建部位
+        const existingPosition = await prisma.position.findFirst({
+          where: {
+            accountId: existingTrade.accountId,
+            stockCode,
+            status: 'OPEN',
+          },
+          orderBy: { entryDate: 'desc' },
+        });
+        
+        if (existingPosition) {
+          newPositionId = existingPosition.id;
+        } else if (oldPositionId) {
+          // 使用舊部位（可能是因為之前是賣出，現在改為買入）
+          newPositionId = oldPositionId;
+        } else {
+          // 創建新部位
+          const newPosition = await prisma.position.create({
+            data: {
+              accountId: existingTrade.accountId,
+              stockCode,
+              stockName: stockName || null,
+              status: 'OPEN',
+              entryDate: new Date(tradeDate),
+              avgEntryPrice: parseFloat(price),
+              totalQuantity: calculation.totalShares,
+              totalInvested: calculation.totalCost,
+              totalCommission: calculation.commission,
+            },
+          });
+          newPositionId = newPosition.id;
+        }
+      } else {
+        // 賣出交易，需要關聯到對應的開倉部位
+        if (oldPositionId) {
+          newPositionId = oldPositionId;
+        } else {
+          // 查找該股票是否有開倉部位
+          const existingPosition = await prisma.position.findFirst({
+            where: {
+              accountId: existingTrade.accountId,
+              stockCode,
+              status: 'OPEN',
+            },
+            orderBy: { entryDate: 'desc' },
+          });
+          
+          if (existingPosition) {
+            newPositionId = existingPosition.id;
+          }
+        }
+      }
+    }
+
     // 更新交易記錄
     const updatedTrade = await prisma.trade.update({
       where: { id },
@@ -135,8 +263,8 @@ export async function PUT(
         stockName: stockName || null,
         tradeType,
         tradeDate: new Date(tradeDate),
-        price: parseFloat(price),
-        quantity: parseInt(quantity),
+        price: parseFloat(String(price)),
+        quantity: parsedQuantity,
         unit: unit as TradeUnit,
         amount: calculation.amount,
         commission: calculation.commission,
@@ -144,18 +272,40 @@ export async function PUT(
         totalCost: calculation.totalCost,
         securityType,
         isDayTrade,
+        positionId: newPositionId,
       },
       include: {
         position: true,
       },
     });
 
-    // 如果有關聯部位，需要重新計算部位資訊
-    if (existingTrade.positionId) {
-      await updatePositionFromTrades(existingTrade.positionId);
+    // 重新計算相關部位資訊
+    if (newPositionId) {
+      await updatePositionFromTrades(newPositionId);
+    }
+    
+    // 如果股票代碼改變且舊部位還有其他交易，也需要重新計算舊部位
+    if (stockCodeChanged && oldPositionId && oldPositionId !== newPositionId) {
+      const remainingTradesInOldPosition = await prisma.trade.count({
+        where: {
+          positionId: oldPositionId,
+        },
+      });
+      
+      if (remainingTradesInOldPosition > 0) {
+        await updatePositionFromTrades(oldPositionId);
+      }
     }
 
-    return NextResponse.json(updatedTrade);
+    // 重新查詢交易記錄，確保返回最新的數據
+    const finalTrade = await prisma.trade.findUnique({
+      where: { id },
+      include: {
+        position: true,
+      },
+    });
+
+    return NextResponse.json(finalTrade);
   } catch (error) {
     console.error('Error updating trade:', error);
     return NextResponse.json({ error: '更新交易記錄失敗' }, { status: 500 });

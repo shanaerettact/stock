@@ -8,6 +8,10 @@ import { prisma } from '@/lib/prisma';
 import { calculateTrade } from '@/lib/tradeCalculations';
 import { validateTradeForm } from '@/lib/formValidation';
 
+// 強制動態渲染，禁止快取
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // GET /api/trades - 查詢所有交易
 export async function GET(request: NextRequest) {
   try {
@@ -30,7 +34,14 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(trades);
+    // 禁止快取，確保返回最新資料
+    return NextResponse.json(trades, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
+    });
   } catch (error) {
     console.error('查詢交易失敗:', error);
     return NextResponse.json(

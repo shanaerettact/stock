@@ -33,10 +33,12 @@ export default function HomePage() {
   const loadData = async () => {
     try {
       setLoading(true);
+      // 添加時間戳防止快取
+      const timestamp = Date.now();
       const [tradesRes, positionsRes, accountRes] = await Promise.all([
-        fetch(`/api/trades?accountId=${ACCOUNT_ID}`),
-        fetch(`/api/positions?accountId=${ACCOUNT_ID}`),
-        fetch(`/api/account`)
+        fetch(`/api/trades?accountId=${ACCOUNT_ID}&_t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/positions?accountId=${ACCOUNT_ID}&_t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/account?_t=${timestamp}`, { cache: 'no-store' })
       ]);
       
       if (tradesRes.ok) setTrades(await tradesRes.json());
@@ -348,6 +350,61 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId }: {
   onDelete: (id: string) => void;
   deletingTradeId: string | null;
 }) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const totalPages = Math.ceil(trades.length / itemsPerPage);
+  
+  // 計算當前頁的資料範圍
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentTrades = trades.slice(startIndex, endIndex);
+  
+  // 當交易記錄變更時，重置到第一頁
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [trades.length]);
+  
+  // 生成頁碼按鈕
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const maxVisiblePages = 5;
+    
+    if (totalPages <= maxVisiblePages) {
+      // 如果總頁數少於等於最大顯示頁數，顯示所有頁碼
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // 否則顯示部分頁碼，包含當前頁前後各2頁
+      if (currentPage <= 3) {
+        // 前幾頁
+        for (let i = 1; i <= 5; i++) {
+          pages.push(i);
+        }
+        pages.push('...');
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        // 後幾頁
+        pages.push(1);
+        pages.push('...');
+        for (let i = totalPages - 4; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        // 中間頁
+        pages.push(1);
+        pages.push('...');
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+          pages.push(i);
+        }
+        pages.push('...');
+        pages.push(totalPages);
+      }
+    }
+    
+    return pages;
+  };
+  
   return (
     <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
       <h2 className="text-2xl font-bold text-gray-100 mb-4">📝 最近交易記錄</h2>
@@ -365,54 +422,114 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId }: {
             </tr>
           </thead>
           <tbody>
-            {trades.slice(0, 10).map((trade) => (
-              <tr key={trade.id} className="border-b border-gray-800 hover:bg-gray-800/50">
-                <td className="py-3 px-4 text-sm text-gray-400">
-                  {new Date(trade.tradeDate).toLocaleDateString('zh-TW')}
-                </td>
-                <td className="py-3 px-4">
-                  <div className="font-semibold text-gray-200">{trade.stockCode}</div>
-                  {trade.stockName && <div className="text-sm text-gray-500">{trade.stockName}</div>}
-                </td>
-                <td className="text-center py-3 px-4">
-                  <span className={`px-2 py-1 rounded text-sm font-semibold ${
-                    trade.tradeType === 'BUY' ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'
-                  }`}>
-                    {trade.tradeType === 'BUY' ? '買進' : '賣出'}
-                  </span>
-                </td>
-                <td className="text-right py-3 px-4 text-gray-200">{trade.price.toLocaleString('zh-TW')} 元</td>
-                <td className="text-right py-3 px-4 text-gray-200">
-                  {trade.quantity} {trade.unit === 'SHARES' ? '股' : '張'}
-                </td>
-                <td className="text-right py-3 px-4 font-semibold text-gray-200">
-                  {trade.amount.toLocaleString('zh-TW')} 元
-                </td>
-                <td className="text-center py-3 px-4">
-                  <div className="flex items-center justify-center gap-2">
-                    <button
-                      onClick={() => onEdit(trade)}
-                      className="text-blue-400 hover:text-blue-300 font-medium text-sm px-2 py-1 rounded hover:bg-blue-900/30 transition-colors"
-                    >
-                      ✏️ 編輯
-                    </button>
-                    <button
-                      onClick={() => onDelete(trade.id)}
-                      disabled={deletingTradeId === trade.id}
-                      className="text-red-400 hover:text-red-300 font-medium text-sm px-2 py-1 rounded hover:bg-red-900/30 transition-colors disabled:opacity-50"
-                    >
-                      {deletingTradeId === trade.id ? '⏳' : '🗑️'} 刪除
-                    </button>
-                  </div>
+            {currentTrades.length > 0 ? (
+              currentTrades.map((trade) => (
+                <tr key={trade.id} className="border-b border-gray-800 hover:bg-gray-800/50">
+                  <td className="py-3 px-4 text-sm text-gray-400">
+                    {new Date(trade.tradeDate).toLocaleDateString('zh-TW')}
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="font-semibold text-gray-200">{trade.stockCode}</div>
+                    {trade.stockName && <div className="text-sm text-gray-500">{trade.stockName}</div>}
+                  </td>
+                  <td className="text-center py-3 px-4">
+                    <span className={`px-2 py-1 rounded text-sm font-semibold ${
+                      trade.tradeType === 'BUY' ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'
+                    }`}>
+                      {trade.tradeType === 'BUY' ? '買進' : '賣出'}
+                    </span>
+                  </td>
+                  <td className="text-right py-3 px-4 text-gray-200">{trade.price.toLocaleString('zh-TW')} 元</td>
+                  <td className="text-right py-3 px-4 text-gray-200">
+                    {trade.quantity} {trade.unit === 'SHARES' ? '股' : '張'}
+                  </td>
+                  <td className="text-right py-3 px-4 font-semibold text-gray-200">
+                    {trade.amount.toLocaleString('zh-TW')} 元
+                  </td>
+                  <td className="text-center py-3 px-4">
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => onEdit(trade)}
+                        className="text-blue-400 hover:text-blue-300 font-medium text-sm px-2 py-1 rounded hover:bg-blue-900/30 transition-colors"
+                      >
+                        ✏️ 編輯
+                      </button>
+                      <button
+                        onClick={() => onDelete(trade.id)}
+                        disabled={deletingTradeId === trade.id}
+                        className="text-red-400 hover:text-red-300 font-medium text-sm px-2 py-1 rounded hover:bg-red-900/30 transition-colors disabled:opacity-50"
+                      >
+                        {deletingTradeId === trade.id ? '⏳' : '🗑️'} 刪除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7} className="py-8 text-center text-gray-500">
+                  尚無交易記錄
                 </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>
-      {trades.length > 10 && (
-        <div className="mt-4 text-center text-sm text-gray-500">
-          顯示最近 10 筆，共 {trades.length} 筆交易記錄
+      
+      {/* 分頁控件 */}
+      {totalPages > 1 && (
+        <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-sm text-gray-400">
+            顯示第 {startIndex + 1} - {Math.min(endIndex, trades.length)} 筆，共 {trades.length} 筆交易記錄
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {/* 上一頁按鈕 */}
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300 rounded-lg border border-gray-700 transition-colors text-sm font-medium"
+            >
+              ← 上一頁
+            </button>
+            
+            {/* 頁碼按鈕 */}
+            <div className="flex items-center gap-1">
+              {getPageNumbers().map((page, index) => {
+                if (page === '...') {
+                  return (
+                    <span key={`ellipsis-${index}`} className="px-2 text-gray-500">
+                      ...
+                    </span>
+                  );
+                }
+                
+                const pageNum = page as number;
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      currentPage === pageNum
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700'
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+            
+            {/* 下一頁按鈕 */}
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300 rounded-lg border border-gray-700 transition-colors text-sm font-medium"
+            >
+              下一頁 →
+            </button>
+          </div>
         </div>
       )}
     </div>

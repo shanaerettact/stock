@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
 import DataModal from '@/components/DataModal';
@@ -291,28 +291,11 @@ export default function HomePage() {
 
         {/* 交易表單 */}
         {showForm && (
-          <div className="bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-700">
-            <h2 className="text-2xl font-bold text-gray-100 mb-6">
-              {editingTrade ? '✏️ 編輯交易記錄' : '📝 新增交易記錄'}
-            </h2>
-            <TradeForm
-              onSubmit={handleSubmit}
-              onCancel={handleCancelEdit}
-              submitLabel={editingTrade ? '更新交易' : '新增交易'}
-              initialData={editingTrade ? {
-                stockCode: editingTrade.stockCode,
-                stockName: editingTrade.stockName || '',
-                tradeType: editingTrade.tradeType as 'BUY' | 'SELL',
-                tradeDate: new Date(editingTrade.tradeDate).toISOString().split('T')[0],
-                price: editingTrade.price.toString(),
-                quantity: editingTrade.quantity.toString(),
-                unit: editingTrade.unit as 'SHARES' | 'LOTS',
-                securityType: (editingTrade.securityType as 'STOCK' | 'ETF' | 'TDR' | 'WARRANT') || 'STOCK',
-                isDayTrade: editingTrade.isDayTrade || false,
-                plannedStopLoss: '',
-              } : undefined}
-            />
-          </div>
+          <TradeFormWrapper
+            editingTrade={editingTrade}
+            onSubmit={handleSubmit}
+            onCancel={handleCancelEdit}
+          />
         )}
       </div>
 
@@ -340,6 +323,44 @@ function StatCard({ label, value, unit, color }: { label: string; value: number;
       <div className="text-sm text-gray-400 mb-1">{label}</div>
       <div className={`text-3xl font-bold ${colorClass}`}>{value}</div>
       <div className="text-xs text-gray-500 mt-1">{unit}</div>
+    </div>
+  );
+}
+
+// 使用獨立的 wrapper 組件來避免 initialData 被重新創建
+function TradeFormWrapper({ editingTrade, onSubmit, onCancel }: {
+  editingTrade: Trade | null;
+  onSubmit: (data: TradeFormData) => Promise<void>;
+  onCancel: () => void;
+}) {
+  // 使用 useMemo 緩存 initialData，只有當 editingTrade.id 改變時才重新創建
+  const initialData = useMemo(() => {
+    if (!editingTrade) return undefined;
+    return {
+      stockCode: editingTrade.stockCode,
+      stockName: editingTrade.stockName || '',
+      tradeType: editingTrade.tradeType as 'BUY' | 'SELL',
+      tradeDate: new Date(editingTrade.tradeDate).toISOString().split('T')[0],
+      price: editingTrade.price.toString(),
+      quantity: editingTrade.quantity.toString(),
+      unit: editingTrade.unit as 'SHARES' | 'LOTS',
+      securityType: (editingTrade.securityType as 'STOCK' | 'ETF' | 'TDR' | 'WARRANT') || 'STOCK',
+      isDayTrade: editingTrade.isDayTrade || false,
+      plannedStopLoss: '',
+    };
+  }, [editingTrade?.id]); // 只依賴 id，避免內容變化導致重新創建
+
+  return (
+    <div className="bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-700">
+      <h2 className="text-2xl font-bold text-gray-100 mb-6">
+        {editingTrade ? '✏️ 編輯交易記錄' : '📝 新增交易記錄'}
+      </h2>
+      <TradeForm
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+        submitLabel={editingTrade ? '更新交易' : '新增交易'}
+        initialData={initialData}
+      />
     </div>
   );
 }

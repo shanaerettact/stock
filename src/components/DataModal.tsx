@@ -693,7 +693,7 @@ export default function DataModal({
             <div className="mt-6">
               <h4 className="font-semibold text-gray-200 mb-3">已平倉部位</h4>
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {positions.filter(p => p.status === 'CLOSED').slice(0, 5).map(position => (
+                {positions.filter(p => p.status === 'CLOSED').map(position => (
                   <div key={position.id} className={`rounded p-3 border ${
                     (position.totalPnL || 0) >= 0 
                       ? 'bg-green-900/30 border-green-800' 

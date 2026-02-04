@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
-import DataModal from '@/components/DataModal';
 import PositionsTable from '@/components/PositionsTable';
 import type { Trade, Position } from '@/lib/types';
 
@@ -17,8 +16,6 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
-  const [selectedFeature, setSelectedFeature] = useState<'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly' | null>(null);
-  const [accountBalance, setAccountBalance] = useState(100000);
   const [initialCapital, setInitialCapital] = useState(100000);
   const [recalculating, setRecalculating] = useState(false);
 
@@ -45,7 +42,6 @@ export default function HomePage() {
       if (accountRes.ok) {
         const data = await accountRes.json();
         setInitialCapital(data.initialCapital || 100000);
-        setAccountBalance(data.currentBalance || 100000);
       }
     } catch (error) {
       console.error('載入資料失敗:', error);
@@ -108,30 +104,6 @@ export default function HomePage() {
   const handleCancelEdit = () => {
     setEditingTrade(null);
     setShowForm(false);
-  };
-
-  // 更新初始資金
-  const handleUpdateCapital = async (newCapital: number) => {
-    try {
-      const response = await fetch('/api/account', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initialCapital: newCapital }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || '更新失敗');
-      }
-
-      const data = await response.json();
-      setInitialCapital(data.initialCapital);
-      setAccountBalance(data.currentBalance);
-      showMessage('success', '✅ 初始資金已更新！');
-    } catch (error) {
-      showMessage('error', error instanceof Error ? error.message : '更新初始資金失敗');
-      throw error;
-    }
   };
 
   // 重新計算所有部位
@@ -250,21 +222,7 @@ export default function HomePage() {
               <EmptyState />
             )}
 
-            {/* 資料統計 Modal */}
-            {selectedFeature && (
-              <DataModal
-                isOpen={!!selectedFeature}
-                onClose={() => setSelectedFeature(null)}
-                type={selectedFeature}
-                trades={trades}
-                positions={positions}
-                accountBalance={accountBalance}
-                initialCapital={initialCapital}
-                onUpdateCapital={handleUpdateCapital}
-              />
-            )}
-
-            {/* 快速開始按鈕 */}
+            {/* 新增交易 */}
             <div className="flex justify-center">
               <button
                 onClick={() => setShowForm(true)}

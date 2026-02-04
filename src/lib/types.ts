@@ -33,8 +33,10 @@ export interface Position {
   avgEntryPrice: number;
   totalQuantity: number;
   stopLossPrice: number | null;
+  plannedStopLoss: number | null;
   totalPnL: number | null;
   returnRate: number | null;
+  rValue: number | null;
   totalInvested?: number;      // 總投入成本（含手續費）
   totalCommission?: number;    // 總手續費
 }

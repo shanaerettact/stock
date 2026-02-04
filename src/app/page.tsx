@@ -5,7 +5,6 @@ import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
 import DataModal from '@/components/DataModal';
 import PositionsTable from '@/components/PositionsTable';
-import StrongStocksPanel from '@/components/StrongStocksPanel';
 import type { Trade, Position } from '@/lib/types';
 
 const ACCOUNT_ID = 'cmj47funv00007jwbtrkd22t9';
@@ -229,9 +228,6 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* 強勢股區塊 */}
-            <StrongStocksPanel onMessage={showMessage} />
-
             {/* 持倉部位 */}
             <PositionsTable 
               positions={positions} 
@@ -253,9 +249,6 @@ export default function HomePage() {
             {trades.length === 0 && !loading && (
               <EmptyState />
             )}
-
-            {/* 功能介紹卡片 */}
-            <FeatureCards onSelect={setSelectedFeature} />
 
             {/* 資料統計 Modal */}
             {selectedFeature && (
@@ -281,11 +274,6 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* 使用說明 */}
-            <QuickStartGuide />
-
-            {/* 技術資訊 */}
-            <TechInfo />
           </div>
         )}
 
@@ -563,88 +551,6 @@ function EmptyState() {
       <div className="text-6xl mb-4">📊</div>
       <h3 className="text-xl font-semibold text-gray-200 mb-2">尚無交易記錄</h3>
       <p className="text-gray-400 mb-4">點擊下方按鈕開始記錄您的第一筆交易</p>
-    </div>
-  );
-}
-
-function FeatureCards({ onSelect }: { onSelect: (feature: 'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly') => void }) {
-  const features = [
-    { key: 'trades', icon: '📝', title: '交易記錄', desc: '記錄每筆買賣，自動計算手續費與交易稅' },
-    { key: 'performance', icon: '📊', title: '績效分析', desc: '勝率、盈虧比、期望值、R 值等專業指標' },
-    { key: 'funds', icon: '💰', title: '資金管理', desc: '追蹤帳戶餘額、最大回撤、風險控制' },
-    { key: 'positions', icon: '📈', title: '部位管理', desc: '成對交易追蹤，計算持有天數與報酬率' },
-    { key: 'rvalue', icon: '🎲', title: 'R 值分析', desc: '風險報酬比計算，量化交易品質' },
-    { key: 'monthly', icon: '📅', title: '月度統計', desc: '按月份統計績效，找出交易規律' },
-  ] as const;
-
-  return (
-    <div className="bg-gray-900 rounded-lg shadow-md p-8 border border-gray-800">
-      <h2 className="text-2xl font-bold text-gray-100 mb-6">🎯 核心功能</h2>
-      <p className="text-gray-400 mb-6 text-sm">點擊功能卡片查看詳細說明</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {features.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => onSelect(f.key)}
-            className="bg-gradient-to-br from-gray-800 to-gray-850 hover:from-gray-700 hover:to-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1 text-left w-full"
-          >
-            <div className="text-4xl mb-3">{f.icon}</div>
-            <h3 className="text-lg font-semibold text-gray-200 mb-2">{f.title}</h3>
-            <p className="text-gray-400 text-sm mb-3">{f.desc}</p>
-            <div className="text-blue-400 text-xs font-semibold flex items-center gap-1">
-              點擊查看詳情
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function QuickStartGuide() {
-  const steps = [
-    { num: '1', title: '新增交易記錄', desc: '點擊上方按鈕，輸入股票代號、價格、數量等資訊' },
-    { num: '2', title: '系統自動計算', desc: '手續費（六折）、交易稅、總成本將即時顯示' },
-    { num: '3', title: '查看統計分析', desc: '點擊功能卡片查看交易績效與各項統計指標' },
-    { num: '4', title: '追蹤交易表現', desc: '分析勝率、R 值、回撤等關鍵指標，優化交易策略' },
-  ];
-
-  return (
-    <div className="bg-gray-900 rounded-lg shadow-md p-8 border border-gray-800">
-      <h2 className="text-2xl font-bold text-gray-100 mb-6">🚀 快速開始</h2>
-      <div className="space-y-4 text-gray-300">
-        {steps.map((step) => (
-          <div key={step.num} className="flex gap-4">
-            <div className="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
-              {step.num}
-            </div>
-            <div>
-              <h4 className="font-semibold text-gray-200 mb-1">{step.title}</h4>
-              <p className="text-gray-400 text-sm">{step.desc}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TechInfo() {
-  return (
-    <div className="bg-gray-800/50 rounded-lg p-6 text-sm text-gray-400 border border-gray-700">
-      <p className="mb-2">
-        <strong className="text-gray-300">技術架構：</strong> Next.js 14 + Prisma + SQLite + TypeScript + Tailwind CSS
-      </p>
-      <p className="mb-2"><strong className="text-gray-300">API 路由：</strong></p>
-      <ul className="list-disc list-inside ml-4 space-y-1">
-        <li>POST /api/trades - 新增交易</li>
-        <li>GET /api/trades - 查詢交易</li>
-        <li>GET /api/positions - 查詢部位</li>
-        <li>GET /api/stock-price - 取得即時股價</li>
-      </ul>
     </div>
   );
 }

@@ -1,40 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
-interface Trade {
-  id: string;
-  stockCode: string;
-  stockName: string | null;
-  tradeType: string;
-  tradeDate: string;
-  price: number;
-  quantity: number;
-  unit: string;
-  securityType: string;
-  isDayTrade: boolean;
-  amount: number;
-  commission: number;
-  tax: number;
-  totalCost: number;
-}
-
-interface Position {
-  id: string;
-  stockCode: string;
-  stockName: string | null;
-  status: string;
-  entryDate: string;
-  avgEntryPrice: number;
-  totalQuantity: number;
-  stopLossPrice: number | null;
-  plannedStopLoss: number | null;
-  totalPnL: number | null;
-  returnRate: number | null;
-  rValue: number | null;
-  totalInvested?: number;      // 總投入成本（含手續費）
-  totalCommission?: number;    // 總手續費
-}
+import type { Trade, Position } from '@/lib/types';
 
 interface DataModalProps {
   isOpen: boolean;

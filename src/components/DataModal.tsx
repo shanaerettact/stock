@@ -114,8 +114,8 @@ export default function DataModal({
         pnl: number;
         wins: number;
         losses: number;
-        winPnLs: number[];
-        lossPnLs: number[];
+        winReturnRates: number[];
+        lossReturnRates: number[];
         holdingDaysWin: number[];
         holdingDaysLoss: number[];
       };
@@ -130,8 +130,8 @@ export default function DataModal({
           pnl: 0,
           wins: 0,
           losses: 0,
-          winPnLs: [],
-          lossPnLs: [],
+          winReturnRates: [],
+          lossReturnRates: [],
           holdingDaysWin: [],
           holdingDaysLoss: [],
         };
@@ -139,15 +139,16 @@ export default function DataModal({
       const row = monthlyData[monthKey];
       row.trades++;
       const pnl = position.totalPnL ?? 0;
+      const rate = position.returnRate ?? null;
       row.pnl += pnl;
       const days = position.holdingDays ?? null;
       if (pnl > 0) {
         row.wins++;
-        row.winPnLs.push(pnl);
+        if (rate != null) row.winReturnRates.push(rate);
         if (days != null) row.holdingDaysWin.push(days);
       } else if (pnl < 0) {
         row.losses++;
-        row.lossPnLs.push(pnl);
+        if (rate != null) row.lossReturnRates.push(rate);
         if (days != null) row.holdingDaysLoss.push(days);
       }
     });
@@ -155,23 +156,23 @@ export default function DataModal({
     const map: Record<string, {
       trades: number;
       pnl: number;
-      avgWin: number | null;
-      avgLoss: number | null;
-      maxWin: number | null;
-      maxLoss: number | null;
+      avgWinPct: number | null;
+      avgLossPct: number | null;
+      maxWinPct: number | null;
+      maxLossPct: number | null;
       winRate: number;
       avgHoldingWin: number | null;
       avgHoldingLoss: number | null;
     }> = {};
     Object.entries(monthlyData).forEach(([month, d]) => {
-      const avgWin = d.winPnLs.length > 0 ? d.winPnLs.reduce((a, b) => a + b, 0) / d.winPnLs.length : null;
-      const avgLoss = d.lossPnLs.length > 0 ? d.lossPnLs.reduce((a, b) => a + b, 0) / d.lossPnLs.length : null;
-      const maxWin = d.winPnLs.length > 0 ? Math.max(...d.winPnLs) : null;
-      const maxLoss = d.lossPnLs.length > 0 ? Math.min(...d.lossPnLs) : null;
+      const avgWinPct = d.winReturnRates.length > 0 ? d.winReturnRates.reduce((a, b) => a + b, 0) / d.winReturnRates.length : null;
+      const avgLossPct = d.lossReturnRates.length > 0 ? d.lossReturnRates.reduce((a, b) => a + b, 0) / d.lossReturnRates.length : null;
+      const maxWinPct = d.winReturnRates.length > 0 ? Math.max(...d.winReturnRates) : null;
+      const maxLossPct = d.lossReturnRates.length > 0 ? Math.min(...d.lossReturnRates) : null;
       const winRate = d.trades > 0 ? (d.wins / d.trades) * 100 : 0;
       const avgHoldingWin = d.holdingDaysWin.length > 0 ? d.holdingDaysWin.reduce((a, b) => a + b, 0) / d.holdingDaysWin.length : null;
       const avgHoldingLoss = d.holdingDaysLoss.length > 0 ? d.holdingDaysLoss.reduce((a, b) => a + b, 0) / d.holdingDaysLoss.length : null;
-      map[month] = { trades: d.trades, pnl: d.pnl, avgWin, avgLoss, maxWin, maxLoss, winRate, avgHoldingWin, avgHoldingLoss };
+      map[month] = { trades: d.trades, pnl: d.pnl, avgWinPct, avgLossPct, maxWinPct, maxLossPct, winRate, avgHoldingWin, avgHoldingLoss };
     });
     return map;
   };
@@ -935,10 +936,10 @@ export default function DataModal({
                       </td>
                       <td className={s ? td : tdEmpty}>{s ? s.trades : '—'}</td>
                       <td className={s ? td : tdEmpty}>{s ? `${s.winRate.toFixed(1)}%` : '—'}</td>
-                      <td className={s ? td : tdEmpty}>{s && s.avgWin != null ? `+${s.avgWin.toLocaleString()}` : '—'}</td>
-                      <td className={s ? td : tdEmpty}>{s && s.avgLoss != null ? s.avgLoss.toLocaleString() : '—'}</td>
-                      <td className={s ? td : tdEmpty}>{s && s.maxWin != null ? `+${s.maxWin.toLocaleString()}` : '—'}</td>
-                      <td className={s ? td : tdEmpty}>{s && s.maxLoss != null ? s.maxLoss.toLocaleString() : '—'}</td>
+                      <td className={s ? td : tdEmpty}>{s && s.avgWinPct != null ? `+${s.avgWinPct.toFixed(2)}%` : '—'}</td>
+                      <td className={s ? td : tdEmpty}>{s && s.avgLossPct != null ? `${s.avgLossPct.toFixed(2)}%` : '—'}</td>
+                      <td className={s ? td : tdEmpty}>{s && s.maxWinPct != null ? `+${s.maxWinPct.toFixed(2)}%` : '—'}</td>
+                      <td className={s ? td : tdEmpty}>{s && s.maxLossPct != null ? `${s.maxLossPct.toFixed(2)}%` : '—'}</td>
                       <td className={s ? td : tdEmpty}>{s && s.avgHoldingWin != null ? `${s.avgHoldingWin.toFixed(1)} 天` : '—'}</td>
                       <td className={s ? td : tdEmpty}>{s && s.avgHoldingLoss != null ? `${s.avgHoldingLoss.toFixed(1)} 天` : '—'}</td>
                     </tr>

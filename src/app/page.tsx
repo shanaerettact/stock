@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
+import DataModal from '@/components/DataModal';
 import PositionsTable from '@/components/PositionsTable';
 import type { Trade, Position } from '@/lib/types';
 
@@ -16,6 +17,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
+  const [selectedFeature, setSelectedFeature] = useState<'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly' | null>(null);
+  const [accountBalance, setAccountBalance] = useState(100000);
   const [initialCapital, setInitialCapital] = useState(100000);
   const [recalculating, setRecalculating] = useState(false);
 
@@ -42,6 +45,7 @@ export default function HomePage() {
       if (accountRes.ok) {
         const data = await accountRes.json();
         setInitialCapital(data.initialCapital || 100000);
+        setAccountBalance(data.currentBalance || 100000);
       }
     } catch (error) {
       console.error('載入資料失敗:', error);
@@ -104,6 +108,27 @@ export default function HomePage() {
   const handleCancelEdit = () => {
     setEditingTrade(null);
     setShowForm(false);
+  };
+
+  const handleUpdateCapital = async (newCapital: number) => {
+    try {
+      const response = await fetch('/api/account', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initialCapital: newCapital }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '更新失敗');
+      }
+      const data = await response.json();
+      setInitialCapital(data.initialCapital);
+      setAccountBalance(data.currentBalance);
+      showMessage('success', '✅ 初始資金已更新！');
+    } catch (error) {
+      showMessage('error', error instanceof Error ? error.message : '更新初始資金失敗');
+      throw error;
+    }
   };
 
   // 重新計算所有部位
@@ -222,6 +247,23 @@ export default function HomePage() {
               <EmptyState />
             )}
 
+            {/* 功能介紹卡片 */}
+            <FeatureCards onSelect={setSelectedFeature} />
+
+            {/* 資料統計 Modal */}
+            {selectedFeature && (
+              <DataModal
+                isOpen={!!selectedFeature}
+                onClose={() => setSelectedFeature(null)}
+                type={selectedFeature}
+                trades={trades}
+                positions={positions}
+                accountBalance={accountBalance}
+                initialCapital={initialCapital}
+                onUpdateCapital={handleUpdateCapital}
+              />
+            )}
+
             {/* 新增交易 */}
             <div className="flex justify-center">
               <button
@@ -269,6 +311,43 @@ function StatCard({ label, value, unit, color }: { label: string; value: number;
       <div className="text-sm text-gray-400 mb-1">{label}</div>
       <div className={`text-3xl font-bold ${colorClass}`}>{value}</div>
       <div className="text-xs text-gray-500 mt-1">{unit}</div>
+    </div>
+  );
+}
+
+function FeatureCards({ onSelect }: { onSelect: (feature: 'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly') => void }) {
+  const features = [
+    { key: 'trades' as const, icon: '📝', title: '交易記錄', desc: '記錄每筆買賣，自動計算手續費與交易稅' },
+    { key: 'performance' as const, icon: '📊', title: '績效分析', desc: '勝率、盈虧比、期望值、R 值等專業指標' },
+    { key: 'funds' as const, icon: '💰', title: '資金管理', desc: '追蹤帳戶餘額、最大回撤、風險控制' },
+    { key: 'positions' as const, icon: '📈', title: '部位管理', desc: '成對交易追蹤，計算持有天數與報酬率' },
+    { key: 'rvalue' as const, icon: '🎲', title: 'R 值分析', desc: '風險報酬比計算，量化交易品質' },
+    { key: 'monthly' as const, icon: '📅', title: '月度統計', desc: '按月份統計績效，找出交易規律' },
+  ];
+
+  return (
+    <div className="bg-gray-900 rounded-lg shadow-md p-8 border border-gray-800">
+      <h2 className="text-2xl font-bold text-gray-100 mb-6">🎯 核心功能</h2>
+      <p className="text-gray-400 mb-6 text-sm">點擊功能卡片查看詳細說明</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {features.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => onSelect(f.key)}
+            className="bg-gradient-to-br from-gray-800 to-gray-850 hover:from-gray-700 hover:to-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1 text-left w-full"
+          >
+            <div className="text-4xl mb-3">{f.icon}</div>
+            <h3 className="text-lg font-semibold text-gray-200 mb-2">{f.title}</h3>
+            <p className="text-gray-400 text-sm mb-3">{f.desc}</p>
+            <div className="text-blue-400 text-xs font-semibold flex items-center gap-1">
+              點擊查看詳情
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

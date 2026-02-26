@@ -39,6 +39,8 @@ export interface Position {
   rValue: number | null;
   totalInvested?: number;      // 總投入成本（含手續費）
   totalCommission?: number;    // 總手續費
+  exitDate?: string | Date | null;   // 平倉日期
+  avgExitPrice?: number | null;      // 平均賣出價
 }
 
 // ===== 股價相關 =====

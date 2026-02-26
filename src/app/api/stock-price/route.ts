@@ -70,58 +70,177 @@ const parseVolume = (volumeStr: string | undefined): number | null => {
   return isNaN(volume) ? null : volume;
 };
 
-// FinMind API 歷史資料格式
-interface FinMindData {
+// 歷史 K 線資料格式
+interface HistoryCandle {
   date: string;
-  stock_id: string;
-  Trading_Volume: number;
-  close: number;
+  open: number;
   high: number;
   low: number;
-  open: number;
+  close: number;
+  volume?: number;
 }
 
-// 從 FinMind API 取得歷史資料
-async function fetchFinMindHistory(
+// 民國年轉西元 (e.g. "113/02/01" -> "2024-02-01")
+function rocDateToIso(rocStr: string): string {
+  const [y, m, d] = rocStr.split('/').map(Number);
+  const adYear = y + 1911;
+  return `${adYear}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// 證交所 TWSE 個股日成交（上市股票）https://www.twse.com.tw/exchangeReport/STOCK_DAY
+async function fetchTWSEHistory(
   stockCode: string,
   startDate: string,
   endDate: string
-): Promise<FinMindData[]> {
-  const token = process.env.FINMIND_API_TOKEN;
-  
-  if (!token) {
-    console.warn('FinMind API token 未設定，將跳過歷史資料查詢');
-    return [];
+): Promise<HistoryCandle[]> {
+  const [startY, startM] = startDate.split('-').map(Number);
+  const [endY, endM] = endDate.split('-').map(Number);
+  const result: HistoryCandle[] = [];
+
+  for (let y = startY; y <= endY; y++) {
+    const mStart = y === startY ? startM : 1;
+    const mEnd = y === endY ? endM : 12;
+    for (let m = mStart; m <= mEnd; m++) {
+      const dateStr = `${y}${String(m).padStart(2, '0')}01`;
+      try {
+        const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${dateStr}&stockNo=${stockCode}`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, next: { revalidate: 3600 } });
+        const json = await res.json();
+        if (json.stat !== 'OK' || !Array.isArray(json.data)) continue;
+        for (const row of json.data) {
+          const dateIso = rocDateToIso(row[0]);
+          if (dateIso < startDate || dateIso > endDate) continue;
+          const open = parsePrice(row[3]);
+          const high = parsePrice(row[4]);
+          const low = parsePrice(row[5]);
+          const close = parsePrice(row[6]);
+          const vol = parseVolume(row[1]);
+          if (open != null && high != null && low != null && close != null) {
+            result.push({ date: dateIso, open, high, low, close, volume: vol ?? undefined });
+          }
+        }
+      } catch (e) {
+        console.warn(`TWSE 歷史 ${stockCode} ${dateStr}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
   }
+  result.sort((a, b) => a.date.localeCompare(b.date));
+  return result;
+}
 
-  try {
-    const url = 'https://api.finmindtrade.com/api/v4/data';
-    const params = new URLSearchParams({
-      dataset: 'TaiwanStockPrice',
-      data_id: stockCode,
-      start_date: startDate,
-      end_date: endDate,
-    });
+// 櫃買中心 TPEX 個股日成交（上櫃股票）
+async function fetchTPEXHistory(
+  stockCode: string,
+  startDate: string,
+  endDate: string
+): Promise<HistoryCandle[]> {
+  const [startY, startM] = startDate.split('-').map(Number);
+  const [endY, endM] = endDate.split('-').map(Number);
+  const result: HistoryCandle[] = [];
 
-    const response = await fetch(`${url}?${params.toString()}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
-      next: { revalidate: 3600 }, // 快取 1 小時
-    });
+  for (let y = startY; y <= endY; y++) {
+    const mStart = y === startY ? startM : 1;
+    const mEnd = y === endY ? endM : 12;
+    for (let m = mStart; m <= mEnd; m++) {
+      const rocY = y - 1911;
+      const dParam = `${rocY}/${String(m).padStart(2, '0')}`;
+      try {
+        const url = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&se=AL&stkno=${stockCode}&d=${dParam}`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, next: { revalidate: 3600 } });
+        const json = await res.json();
+        const data = json.aaData ?? json;
+        if (!Array.isArray(data)) continue;
+        for (const row of data) {
+          const dateStr = typeof row[0] === 'string' ? row[0] : row.date;
+          const dateIso = dateStr.includes('/') ? rocDateToIso(dateStr) : dateStr;
+          if (dateIso < startDate || dateIso > endDate) continue;
+          const open = parsePrice(row[3] ?? row.open);
+          const high = parsePrice(row[4] ?? row.high);
+          const low = parsePrice(row[5] ?? row.low);
+          const close = parsePrice(row[6] ?? row.close);
+          const vol = parseVolume(row[1] ?? row.volume);
+          if (open != null && high != null && low != null && close != null) {
+            result.push({ date: dateIso, open, high, low, close, volume: vol ?? undefined });
+          }
+        }
+      } catch (e) {
+        console.warn(`TPEX 歷史 ${stockCode} ${dParam}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  result.sort((a, b) => a.date.localeCompare(b.date));
+  return result;
+}
 
-    if (!response.ok) {
-      console.error(`FinMind API 錯誤 (${stockCode}):`, response.statusText);
+// Yahoo Finance 台股：上市 .TW、上櫃 .TWO（若 .TW 無資料則試 .TWO）
+async function fetchYahooHistory(
+  stockCode: string,
+  startDate: string,
+  endDate: string,
+  market: '上市' | '上櫃' | null
+): Promise<HistoryCandle[]> {
+  const startTs = Math.floor(new Date(startDate).getTime() / 1000);
+  const endTs = Math.floor(new Date(endDate + 'T23:59:59').getTime() / 1000);
+  const tryOrder = market === '上櫃' ? ['TWO', 'TW'] : ['TW', 'TWO'];
+  const fetchOne = async (symbol: string): Promise<HistoryCandle[]> => {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${startTs}&period2=${endTs}&interval=1d`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' }, next: { revalidate: 3600 } });
+      const json = await res.json();
+      const chart = json?.chart?.result?.[0];
+      if (!chart?.timestamp?.length) return [];
+      const q = chart.indicators?.quote?.[0] ?? {};
+      const result: HistoryCandle[] = [];
+      for (let i = 0; i < chart.timestamp.length; i++) {
+        const o = q.open?.[i];
+        const h = q.high?.[i];
+        const l = q.low?.[i];
+        const c = q.close?.[i];
+        if (o == null || h == null || l == null || c == null) continue;
+        const d = new Date(chart.timestamp[i] * 1000);
+        const dateIso = d.toISOString().slice(0, 10);
+        if (dateIso < startDate || dateIso > endDate) continue;
+        result.push({ date: dateIso, open: o, high: h, low: l, close: c });
+      }
+      return result;
+    } catch (e) {
       return [];
     }
-
-    const result = await response.json();
-    return result.data || [];
-  } catch (error) {
-    console.error(`取得 FinMind 歷史資料失敗 (${stockCode}):`, error);
-    return [];
+  };
+  for (const suffix of tryOrder) {
+    const data = await fetchOne(`${stockCode}.${suffix}`);
+    if (data.length > 0) return data;
   }
+  return [];
+}
+
+type FetchSource = 'TWSE' | 'TPEX' | 'Yahoo';
+
+async function fetchHistory(
+  stockCode: string,
+  startDate: string,
+  endDate: string,
+  market: '上市' | '上櫃' | null
+): Promise<{ history: HistoryCandle[]; sourcesTried: FetchSource[] }> {
+  const sourcesTried: FetchSource[] = [];
+  let history: HistoryCandle[] = [];
+
+  const tryOrder: FetchSource[] = market === '上櫃'
+    ? ['TPEX', 'Yahoo', 'TWSE']
+    : market === '上市'
+    ? ['TWSE', 'Yahoo', 'TPEX']
+    : ['TWSE', 'TPEX', 'Yahoo'];
+
+  for (const src of tryOrder) {
+    sourcesTried.push(src);
+    if (src === 'TWSE') history = await fetchTWSEHistory(stockCode, startDate, endDate);
+    else if (src === 'TPEX') history = await fetchTPEXHistory(stockCode, startDate, endDate);
+    else history = await fetchYahooHistory(stockCode, startDate, endDate, market);
+    if (history.length > 0) return { history, sourcesTried };
+  }
+  return { history: [], sourcesTried };
 }
 
 // 計算 52 周新高和 50 日平均交易量
@@ -153,23 +272,15 @@ async function calculateAdvancedMetrics(
   const startDate50Days = new Date(endDate);
   startDate50Days.setDate(startDate50Days.getDate() - 70);
 
-  const endDateStr = endDate.toISOString().split('T')[0];
-  const startDate52WeeksStr = startDate52Weeks.toISOString().split('T')[0];
-  const startDate50DaysStr = startDate50Days.toISOString().split('T')[0];
+  const endDateStr = endDate.toISOString().split('T')[0] ?? '';
+  const startDate52WeeksStr = startDate52Weeks.toISOString().split('T')[0] ?? '';
+  const startDate50DaysStr = startDate50Days.toISOString().split('T')[0] ?? '';
 
-  // 取得 52 周歷史資料
-  const history52Weeks = await fetchFinMindHistory(
-    stockCode,
-    startDate52WeeksStr,
-    endDateStr
-  );
+  // 取得 52 周歷史資料（證交所/櫃買/Yahoo）
+  const { history: history52Weeks } = await fetchHistory(stockCode, startDate52WeeksStr, endDateStr, null);
 
   // 取得 50 日歷史資料（用於計算平均交易量）
-  const history50Days = await fetchFinMindHistory(
-    stockCode,
-    startDate50DaysStr,
-    endDateStr
-  );
+  const { history: history50Days } = await fetchHistory(stockCode, startDate50DaysStr, endDateStr, null);
 
   // 計算 52 周最高價
   let week52High: number | null = null;
@@ -184,8 +295,8 @@ async function calculateAdvancedMetrics(
   let avg50DayVolume: number | null = null;
   if (history50Days.length > 0) {
     const volumes = history50Days
-      .map(d => d.Trading_Volume)
-      .filter(v => v && v > 0);
+      .map(d => d.volume)
+      .filter((v): v is number => v != null && v > 0);
     if (volumes.length > 0) {
       avg50DayVolume = volumes.reduce((sum, v) => sum + v, 0) / volumes.length;
     }
@@ -210,11 +321,38 @@ async function calculateAdvancedMetrics(
 }
 
 // GET /api/stock-price?codes=2330,2317
+// GET /api/stock-price?code=2330&start_date=2024-01-01&end_date=2024-12-31 (歷史日線：TWSE/TPEX/Yahoo)
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const codesParam = searchParams.get('codes');
+    const codeParam = searchParams.get('code');
+    const startDate = searchParams.get('start_date');
+    const endDate = searchParams.get('end_date');
 
+    // 歷史日線模式：依 market 優化來源順序
+    if (codeParam && startDate && endDate) {
+      const code = codeParam.trim();
+      const marketParam = searchParams.get('market');
+      const market = marketParam === '上櫃' || marketParam === '上市' ? marketParam : null;
+      const { history, sourcesTried } = await fetchHistory(code, startDate, endDate, market);
+      if (history.length === 0) {
+        console.warn(`[歷史日線無資料] 代碼=${code} 市場=${market ?? '未知'} 已嘗試=${sourcesTried.join(',')}`);
+      }
+      return NextResponse.json({
+        success: true,
+        data: history.map(d => ({
+          date: d.date,
+          open: d.open,
+          high: d.high,
+          low: d.low,
+          close: d.close,
+          volume: null,
+        })),
+        ...(history.length === 0 && { debug: { stockCode: code, market: market ?? '未知', sourcesTried } }),
+      });
+    }
+
+    const codesParam = searchParams.get('codes');
     if (!codesParam) {
       return NextResponse.json(
         { error: '請提供股票代號 (codes 參數)' },

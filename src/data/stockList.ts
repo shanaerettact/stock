@@ -2289,6 +2289,12 @@ export function getStockNameByCode(code: string): string | null {
   return stockByCode.get(code)?.name || null;
 }
 
+/** 根據股票代號查詢市場（上市/上櫃） */
+export function getStockMarketByCode(code: string): '上市' | '上櫃' | null {
+  const m = stockByCode.get(code)?.market;
+  return m === '上市' || m === '上櫃' ? m : null;
+}
+
 /** 根據股票名稱查詢股票代號 */
 export function getStockCodeByName(name: string): string | null {
   return stockByName.get(name)?.code || null;

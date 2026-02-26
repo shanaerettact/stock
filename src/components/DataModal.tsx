@@ -1,7 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { createChart, createSeriesMarkers, CandlestickSeries } from 'lightweight-charts';
 import type { Trade, Position } from '@/lib/types';
+import { getStockMarketByCode } from '@/data/stockList';
+
+type ChartCandle = { date: string; open: number; high: number; low: number; close: number; entry?: number; exit?: number };
 
 interface DataModalProps {
   isOpen: boolean;
@@ -27,12 +31,137 @@ export default function DataModal({
   const [isEditingCapital, setIsEditingCapital] = useState(false);
   const [editCapitalValue, setEditCapitalValue] = useState('');
   const [savingCapital, setSavingCapital] = useState(false);
+  const [chartPosition, setChartPosition] = useState<Position | null>(null);
+  const [chartData, setChartData] = useState<ChartCandle[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartError, setChartError] = useState<string | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartInstanceRef = useRef<ReturnType<typeof createChart> | null>(null);
+
+  const openChart = useCallback(async (position: Position) => {
+    if (position.status !== 'CLOSED') return;
+    const exitDate = position.exitDate ? new Date(position.exitDate) : null;
+    if (!exitDate || !position.avgExitPrice) {
+      setChartError('缺少平倉資訊');
+      return;
+    }
+    setChartPosition(position);
+    setChartError(null);
+    setChartData([]);
+    setChartLoading(true);
+    const entryDate = new Date(position.entryDate);
+    const padStart = new Date(entryDate);
+    padStart.setDate(padStart.getDate() - 30);
+    const padEnd = new Date(exitDate);
+    padEnd.setDate(padEnd.getDate() + 10);
+    const startStr = padStart.toLocaleDateString('sv');
+    const endStr = padEnd.toLocaleDateString('sv');
+    const market = getStockMarketByCode(position.stockCode);
+    try {
+      const params = new URLSearchParams({
+        code: position.stockCode,
+        start_date: startStr,
+        end_date: endStr,
+      });
+      if (market) params.set('market', market);
+      const res = await fetch(`/api/stock-price?${params.toString()}`);
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || '取得歷史資料失敗');
+      }
+      const raw = json.data || [];
+      if (raw.length === 0) {
+        const dbg = json.debug as { stockCode?: string; market?: string; sourcesTried?: string[] } | undefined;
+        const msg = dbg
+          ? `無法取得歷史資料（${dbg.stockCode ?? position.stockCode} ${dbg.market ?? market ?? '未知'}，已嘗試 ${(dbg.sourcesTried ?? []).join('、')}）`
+          : '無法取得歷史資料（證交所 / 櫃買 / Yahoo 皆無資料）';
+        throw new Error(msg);
+      }
+      const entryStr = entryDate.toLocaleDateString('sv');
+      const exitStr = exitDate.toLocaleDateString('sv');
+      const data: ChartCandle[] = raw
+        .map((d: { date?: string; open?: number | null; high?: number | null; low?: number | null; close?: number | null }) => {
+          const o = d.open != null ? Number(d.open) : NaN;
+          const h = d.high != null ? Number(d.high) : NaN;
+          const l = d.low != null ? Number(d.low) : NaN;
+          const c = d.close != null ? Number(d.close) : NaN;
+          if (!d.date || isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) return null;
+          const candle: ChartCandle = { date: d.date, open: o, high: h, low: l, close: c };
+          if (d.date === entryStr) candle.entry = position.avgEntryPrice;
+          if (d.date === exitStr) candle.exit = position.avgExitPrice!;
+          return candle;
+        })
+        .filter((c: ChartCandle | null): c is ChartCandle => c != null);
+      if (data.length === 0) {
+        throw new Error('無有效的歷史資料');
+      }
+      setChartData(data);
+    } catch (err) {
+      setChartError(err instanceof Error ? err.message : '載入失敗');
+    } finally {
+      setChartLoading(false);
+    }
+  }, []);
+
+  const closeChart = useCallback(() => {
+    setChartPosition(null);
+    setChartData([]);
+    setChartError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!chartContainerRef.current || !chartData.length) return;
+    chartInstanceRef.current?.remove();
+    chartInstanceRef.current = null;
+    const chart = createChart(chartContainerRef.current, {
+      width: chartContainerRef.current.clientWidth,
+      height: 280,
+      layout: { background: { color: '#111827' }, textColor: '#9ca3af' },
+      grid: { vertLines: { color: '#374151' }, horzLines: { color: '#374151' } },
+      rightPriceScale: { borderColor: '#4b5563', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      timeScale: { borderColor: '#4b5563', timeVisible: true, secondsVisible: false },
+    });
+    chartInstanceRef.current = chart;
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#ef4444',
+      downColor: '#22c55e',
+      borderUpColor: '#ef4444',
+      borderDownColor: '#22c55e',
+    });
+    const validData = chartData
+      .map(d => {
+        const o = Number(d.open);
+        const h = Number(d.high);
+        const l = Number(d.low);
+        const c = Number(d.close);
+        if (!d.date || isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) return null;
+        return { time: d.date, open: o, high: h, low: l, close: c };
+      })
+      .filter((d): d is NonNullable<typeof d> => d != null);
+    if (validData.length > 0) candlestickSeries.setData(validData);
+    const markers: { time: string; position: 'belowBar' | 'aboveBar'; color: string; shape: 'arrowUp' | 'arrowDown'; text: string }[] = [];
+    const entryCandle = chartData.find(d => d.entry != null);
+    if (entryCandle) markers.push({ time: entryCandle.date, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: `進場 ${chartPosition?.avgEntryPrice?.toLocaleString() ?? ''}` });
+    const exitCandle = chartData.find(d => d.exit != null);
+    if (exitCandle) markers.push({ time: exitCandle.date, position: 'aboveBar', color: '#ef4444', shape: 'arrowDown', text: `出場 ${chartPosition?.avgExitPrice?.toLocaleString() ?? ''}` });
+    if (markers.length) createSeriesMarkers(candlestickSeries, markers);
+    chart.timeScale().fitContent();
+    const handleResize = () => chart.applyOptions({ width: chartContainerRef.current?.clientWidth ?? 400 });
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+      chartInstanceRef.current = null;
+    };
+  }, [chartData, chartPosition]);
 
   // ESC 鍵關閉
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isEditingCapital) {
+        if (chartPosition) {
+          closeChart();
+        } else if (isEditingCapital) {
           setIsEditingCapital(false);
         } else {
           onClose();
@@ -47,7 +176,7 @@ export default function DataModal({
       document.removeEventListener('keydown', handleEsc);
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen, onClose, isEditingCapital]);
+  }, [isOpen, onClose, isEditingCapital, chartPosition, closeChart]);
 
   // 開始編輯時，設定初始值
   const handleStartEdit = () => {
@@ -740,12 +869,25 @@ export default function DataModal({
                           <span className="text-gray-400 ml-2">{position.stockName}</span>
                         )}
                       </div>
-                      <span className={`text-lg font-bold ${
-                        (position.totalPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'
-                      }`}>
-                        {(position.totalPnL || 0) >= 0 ? '+' : ''}
-                        {(position.totalPnL || 0).toLocaleString()}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openChart(position)}
+                          className="px-2 py-1 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors flex items-center gap-1"
+                          title="查看日線圖（進出場標註）"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                          </svg>
+                          日線圖
+                        </button>
+                        <span className={`text-lg font-bold ${
+                          (position.totalPnL || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}>
+                          {(position.totalPnL || 0) >= 0 ? '+' : ''}
+                          {(position.totalPnL || 0).toLocaleString()}
+                        </span>
+                      </div>
                     </div>
                     <div className="text-sm text-gray-400 mt-1">
                       報酬率：{(position.returnRate || 0).toFixed(2)}%
@@ -990,8 +1132,48 @@ export default function DataModal({
           </div>
         </div>
 
-        <div className="p-6">
+        <div className="p-6 relative">
           {renderContent()}
+
+          {chartPosition && (
+            <div className="absolute inset-0 top-0 left-0 right-0 bottom-0 bg-gray-900 z-20 rounded-lg border border-gray-700 flex flex-col -m-6 p-6">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="font-semibold text-gray-200">
+                  {chartPosition.stockCode} {chartPosition.stockName || ''} 日線圖
+                </h4>
+                <button
+                  type="button"
+                  onClick={closeChart}
+                  className="text-gray-400 hover:text-white p-1"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="flex-1 min-h-[180px]">
+                {chartLoading && (
+                  <div className="flex items-center justify-center h-full text-gray-400">
+                    載入中...
+                  </div>
+                )}
+                {chartError && (
+                  <div className="flex items-center justify-center h-full text-red-400">
+                    {chartError}
+                  </div>
+                )}
+                {!chartLoading && !chartError && chartData.length > 0 && (
+                  <div ref={chartContainerRef} className="w-full" style={{ height: 280 }} />
+                )}
+              </div>
+              {!chartLoading && !chartError && chartData.length > 0 && chartPosition && (
+                <div className="flex gap-4 mt-2 text-sm text-gray-400">
+                  <span>進場：{new Date(chartPosition.entryDate).toLocaleDateString('zh-TW')} @ {chartPosition.avgEntryPrice.toLocaleString()}</span>
+                  <span>出場：{chartPosition.exitDate ? new Date(chartPosition.exitDate).toLocaleDateString('zh-TW') : '-'} @ {(chartPosition.avgExitPrice ?? 0).toLocaleString()}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="sticky bottom-0 bg-gray-800 px-6 py-4 rounded-b-lg border-t border-gray-700">

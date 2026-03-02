@@ -16,6 +16,7 @@ interface DataModalProps {
   accountBalance: number;
   initialCapital: number;
   onUpdateCapital?: (newCapital: number) => Promise<void>;
+  onRefreshData?: () => void | Promise<void>;
 }
 
 export default function DataModal({
@@ -29,6 +30,18 @@ export default function DataModal({
   onUpdateCapital,
 }: DataModalProps) {
   const [isEditingCapital, setIsEditingCapital] = useState(false);
+  const [editingNotePositionId, setEditingNotePositionId] = useState<string | null>(null);
+  const [editingNoteValue, setEditingNoteValue] = useState('');
+  const [positionNotes, setPositionNotes] = useState<Record<string, string>>({});
+  const [savingNote, setSavingNote] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch('/api/position-notes')
+      .then(r => r.ok ? r.json() : {})
+      .then((data: unknown) => setPositionNotes(typeof data === 'object' && data && !Array.isArray(data) ? (data as Record<string, string>) : {}))
+      .catch(() => {});
+  }, [isOpen]);
   const [editCapitalValue, setEditCapitalValue] = useState('');
   const [savingCapital, setSavingCapital] = useState(false);
   const [chartPosition, setChartPosition] = useState<Position | null>(null);
@@ -108,6 +121,38 @@ export default function DataModal({
     setChartData([]);
     setChartError(null);
   }, []);
+
+  const startEditNote = useCallback((position: Position) => {
+    setEditingNotePositionId(position.id);
+    setEditingNoteValue(positionNotes[position.id] ?? position.notes ?? '');
+  }, [positionNotes]);
+
+  const cancelEditNote = useCallback(() => {
+    setEditingNotePositionId(null);
+    setEditingNoteValue('');
+  }, []);
+
+  const saveNote = useCallback(async (positionId: string) => {
+    const value = editingNoteValue.trim();
+    setSavingNote(true);
+    try {
+      const res = await fetch('/api/position-notes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positionId, notes: value }),
+      });
+      if (!res.ok) throw new Error('儲存失敗');
+      const next = { ...positionNotes, [positionId]: value };
+      if (!value) delete next[positionId];
+      setPositionNotes(next);
+      setEditingNotePositionId(null);
+      setEditingNoteValue('');
+    } catch (e) {
+      console.warn('備註儲存失敗', e);
+    } finally {
+      setSavingNote(false);
+    }
+  }, [editingNoteValue, positionNotes]);
 
   useEffect(() => {
     if (!chartContainerRef.current || !chartData.length) return;
@@ -803,60 +848,25 @@ export default function DataModal({
 
       case 'positions':
         return (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-orange-900/30 rounded-lg p-4 border border-orange-800">
-                <div className="text-sm text-gray-400">持倉中</div>
-                <div className="text-3xl font-bold text-orange-400">
-                  {positions.filter(p => p.status === 'OPEN').length}
-                </div>
-              </div>
-              <div className="bg-green-900/30 rounded-lg p-4 border border-green-800">
-                <div className="text-sm text-gray-400">已平倉</div>
-                <div className="text-3xl font-bold text-green-400">
-                  {positions.filter(p => p.status === 'CLOSED').length}
-                </div>
+          <div className="flex flex-col h-full min-h-0 gap-4">
+            <div className="shrink-0 bg-green-900/30 rounded-lg p-4 border border-green-800">
+              <div className="text-sm text-gray-400">已平倉</div>
+              <div className="text-3xl font-bold text-green-400">
+                {positions.filter(p => p.status === 'CLOSED').length}
               </div>
             </div>
             
-            <div className="mt-6">
-              <h4 className="font-semibold text-gray-200 mb-3">持倉部位</h4>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {positions.filter(p => p.status === 'OPEN').map(position => (
-                  <div key={position.id} className="bg-orange-900/30 rounded p-3 border border-orange-800">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <span className="font-semibold text-lg text-gray-200">{position.stockCode}</span>
-                        {position.stockName && (
-                          <span className="text-gray-400 ml-2">{position.stockName}</span>
-                        )}
-                      </div>
-                      <span className="px-2 py-1 bg-orange-900/50 text-orange-400 rounded text-xs font-semibold">
-                        持倉中
-                      </span>
-                    </div>
-                    <div className="text-sm text-gray-400 mt-2 flex flex-wrap gap-x-3">
-                      <span>成本：{position.avgEntryPrice.toLocaleString()} 元</span>
-                      <span>股數：{position.totalQuantity.toLocaleString()} 股</span>
-                      <span className="text-red-400 font-medium">
-                        停損：{(position.stopLossPrice || Math.round(position.avgEntryPrice * 0.92 * 100) / 100).toLocaleString()} 元
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                
-                {positions.filter(p => p.status === 'OPEN').length === 0 && (
-                  <div className="text-center text-gray-500 py-8">
-                    目前無持倉部位
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            <div className="mt-6">
-              <h4 className="font-semibold text-gray-200 mb-3">已平倉部位</h4>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {positions.filter(p => p.status === 'CLOSED').map(position => (
+            <div className="flex-1 min-h-0 flex flex-col">
+              <h4 className="font-semibold text-gray-200 mb-3 shrink-0">已平倉部位</h4>
+              <div className="flex-1 min-h-0 space-y-2 overflow-y-auto">
+                {positions
+                  .filter(p => p.status === 'CLOSED')
+                  .sort((a, b) => {
+                    const aDate = a.exitDate ? new Date(a.exitDate).getTime() : 0;
+                    const bDate = b.exitDate ? new Date(b.exitDate).getTime() : 0;
+                    return bDate - aDate; // 最新賣出日期在前
+                  })
+                  .map(position => (
                   <div key={position.id} className={`rounded p-3 border ${
                     (position.totalPnL || 0) >= 0 
                       ? 'bg-green-900/30 border-green-800' 
@@ -870,6 +880,17 @@ export default function DataModal({
                         )}
                       </div>
                       <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => startEditNote(position)}
+                          className="px-2 py-1 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors flex items-center gap-1"
+                          title="編輯備註"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          備註
+                        </button>
                         <button
                           type="button"
                           onClick={() => openChart(position)}
@@ -892,6 +913,41 @@ export default function DataModal({
                     <div className="text-sm text-gray-400 mt-1">
                       報酬率：{(position.returnRate || 0).toFixed(2)}%
                     </div>
+                    {editingNotePositionId === position.id ? (
+                      <div className="mt-3">
+                        <textarea
+                          value={editingNoteValue}
+                          onChange={e => setEditingNoteValue(e.target.value)}
+                          placeholder="輸入備註..."
+                          className="w-full px-3 py-2 text-sm bg-gray-800 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[60px]"
+                          rows={3}
+                          autoFocus
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => saveNote(position.id)}
+                            disabled={savingNote}
+                            className="px-3 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded"
+                          >
+                            {savingNote ? '儲存中...' : '儲存'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditNote}
+                            className="px-3 py-1 text-xs font-medium bg-gray-600 hover:bg-gray-500 text-gray-200 rounded"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      ((positionNotes[position.id] ?? position.notes) && (
+                        <div className="mt-2 text-sm text-gray-300 bg-gray-800/50 rounded px-3 py-2 whitespace-pre-wrap">
+                          {positionNotes[position.id] ?? position.notes}
+                        </div>
+                      ))
+                    )}
                   </div>
                 ))}
                 
@@ -995,7 +1051,14 @@ export default function DataModal({
                 <div>
                   <h4 className="font-semibold text-gray-200 mb-3">交易 R 值記錄</h4>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {positionsWithR.slice(0, 10).map(position => (
+                    {[...positionsWithR]
+                      .sort((a, b) => {
+                        const aDate = a.exitDate ? new Date(a.exitDate).getTime() : 0;
+                        const bDate = b.exitDate ? new Date(b.exitDate).getTime() : 0;
+                        return bDate - aDate; // 最新賣出日期在前
+                      })
+                      .slice(0, 10)
+                      .map(position => (
                       <div key={position.id} className={`rounded p-3 border ${
                         (position.rValue || 0) >= 0 
                           ? 'bg-green-900/30 border-green-800' 
@@ -1103,7 +1166,7 @@ export default function DataModal({
       case 'trades': return '📝 交易記錄';
       case 'performance': return '📊 績效分析';
       case 'funds': return '💰 資金管理';
-      case 'positions': return '📈 部位管理';
+      case 'positions': return '📈 已平倉紀錄';
       case 'rvalue': return '🎲 R 值分析';
       case 'monthly': return '📅 月度統計';
       default: return '資料統計';
@@ -1117,7 +1180,7 @@ export default function DataModal({
         onClick={onClose}
       />
 
-      <div className="relative bg-gray-900 rounded-lg shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto border border-gray-700">
+      <div className="relative bg-gray-900 rounded-lg shadow-2xl max-w-3xl w-full h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] border border-gray-700 flex flex-col overflow-hidden">
         <div className="sticky top-0 bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6 rounded-t-lg z-10 border-b border-gray-700">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold">{getTitle()}</h2>
@@ -1132,7 +1195,7 @@ export default function DataModal({
           </div>
         </div>
 
-        <div className="p-6 relative">
+        <div className="p-6 relative flex-1 overflow-y-auto min-h-0">
           {renderContent()}
 
           {chartPosition && (

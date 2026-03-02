@@ -56,6 +56,11 @@ export default function HomePage() {
 
   useEffect(() => { loadData(); }, []);
 
+  // 開啟功能 Modal 時重新載入，確保 DataModal、R 值分析等顯示最新買賣資料
+  useEffect(() => {
+    if (selectedFeature) loadData();
+  }, [selectedFeature]);
+
   // 提交交易
   const handleSubmit = async (data: TradeFormData) => {
     try {
@@ -76,7 +81,16 @@ export default function HomePage() {
       showMessage('success', editingTrade ? '✅ 交易記錄更新成功！' : '✅ 交易記錄新增成功！');
       setEditingTrade(null);
       setShowForm(false);
-      loadData();
+      // 重新計算部位（連結孤立賣出、更新平倉狀態），確保即時同步
+      try {
+        const recalcRes = await fetch('/api/positions/recalculate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: ACCOUNT_ID }),
+        });
+        if (!recalcRes.ok) throw new Error('recalc failed');
+      } catch { /* 忽略，loadData 仍會取得現有資料 */ }
+      await loadData();
     } catch (error) {
       showMessage('error', error instanceof Error ? error.message : '操作失敗');
     }
@@ -97,7 +111,14 @@ export default function HomePage() {
       const response = await fetch(`/api/trades/${tradeId}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('刪除失敗');
       showMessage('success', '✅ 交易記錄已刪除！');
-      loadData();
+      try {
+        await fetch('/api/positions/recalculate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: ACCOUNT_ID }),
+        });
+      } catch { /* 忽略 */ }
+      await loadData();
     } catch (error) {
       showMessage('error', error instanceof Error ? error.message : '刪除失敗');
     } finally {
@@ -160,7 +181,7 @@ export default function HomePage() {
       }
       
       showMessage('success', `✅ ${result.message}，已關聯 ${result.linkedTrades} 筆孤立交易${balanceMsg}`);
-      loadData();
+      await loadData();
     } catch (error) {
       showMessage('error', error instanceof Error ? error.message : '重新計算失敗');
     } finally {
@@ -261,6 +282,7 @@ export default function HomePage() {
                 accountBalance={accountBalance}
                 initialCapital={initialCapital}
                 onUpdateCapital={handleUpdateCapital}
+                onRefreshData={loadData}
               />
             )}
 
@@ -320,7 +342,7 @@ function FeatureCards({ onSelect }: { onSelect: (feature: 'trades' | 'performanc
     { key: 'trades' as const, icon: '📝', title: '交易記錄', desc: '記錄每筆買賣，自動計算手續費與交易稅' },
     { key: 'performance' as const, icon: '📊', title: '績效分析', desc: '勝率、盈虧比、期望值、R 值等專業指標' },
     { key: 'funds' as const, icon: '💰', title: '資金管理', desc: '追蹤帳戶餘額、最大回撤、風險控制' },
-    { key: 'positions' as const, icon: '📈', title: '部位管理', desc: '成對交易追蹤，計算持有天數與報酬率' },
+    { key: 'positions' as const, icon: '📈', title: '已平倉紀錄', desc: '成對交易追蹤，計算持有天數與報酬率' },
     { key: 'rvalue' as const, icon: '🎲', title: 'R 值分析', desc: '風險報酬比計算，量化交易品質' },
     { key: 'monthly' as const, icon: '📅', title: '月度統計', desc: '按月份統計績效，找出交易規律' },
   ];

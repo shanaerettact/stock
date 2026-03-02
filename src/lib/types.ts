@@ -41,6 +41,7 @@ export interface Position {
   totalCommission?: number;    // 總手續費
   exitDate?: string | Date | null;   // 平倉日期
   avgExitPrice?: number | null;      // 平均賣出價
+  notes?: string | null;             // 備註
 }
 
 // ===== 股價相關 =====

@@ -4,6 +4,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 import { prisma } from '@/lib/prisma';
 import { calculatePositionPnL, calculateWeightedAvgPrice } from '@/lib/tradeCalculations';
 
@@ -29,7 +32,13 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(positions);
+    return NextResponse.json(positions, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
+    });
   } catch (error) {
     console.error('查詢部位失敗:', error);
     return NextResponse.json(
@@ -39,7 +48,37 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/positions/:id/close - 平倉
+// PATCH /api/positions?id=xxx - 更新部位備註
+export async function PATCH(request: NextRequest) {
+  try {
+    const id = request.nextUrl.searchParams.get('id');
+    if (!id) {
+      return NextResponse.json({ error: '缺少部位 ID' }, { status: 400 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const notes = body?.notes;
+    const notesValue = notes === undefined || notes === null || typeof notes !== 'string' ? null : notes;
+
+    const position = await prisma.position.update({
+      where: { id },
+      data: { notes: notesValue },
+      include: { trades: true },
+    });
+    return NextResponse.json(position);
+  } catch (error: unknown) {
+    console.error('更新部位備註失敗:', error);
+    const err = error as { code?: string };
+    if (err?.code === 'P2025') {
+      return NextResponse.json({ error: '找不到該部位' }, { status: 404 });
+    }
+    return NextResponse.json(
+      { error: '更新失敗', details: error instanceof Error ? (error as Error).message : String(error) },
+      { status: 500 }
+    );
+  }
+}
+
+// POST /api/positions - 平倉
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

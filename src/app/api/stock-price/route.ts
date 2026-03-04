@@ -198,11 +198,13 @@ async function fetchYahooHistory(
         const h = q.high?.[i];
         const l = q.low?.[i];
         const c = q.close?.[i];
+        const vol = q.volume?.[i];
         if (o == null || h == null || l == null || c == null) continue;
         const d = new Date(chart.timestamp[i] * 1000);
         const dateIso = d.toISOString().slice(0, 10);
         if (dateIso < startDate || dateIso > endDate) continue;
-        result.push({ date: dateIso, open: o, high: h, low: l, close: c });
+        const volNum = vol != null && typeof vol === 'number' && !isNaN(vol) ? Math.round(vol) : undefined;
+        result.push({ date: dateIso, open: o, high: h, low: l, close: c, volume: volNum });
       }
       return result;
     } catch (e) {
@@ -346,7 +348,7 @@ export async function GET(request: NextRequest) {
           high: d.high,
           low: d.low,
           close: d.close,
-          volume: null,
+          volume: d.volume ?? null,
         })),
         ...(history.length === 0 && { debug: { stockCode: code, market: market ?? '未知', sourcesTried } }),
       });

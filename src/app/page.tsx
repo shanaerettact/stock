@@ -268,8 +268,8 @@ export default function HomePage() {
               <EmptyState />
             )}
 
-            {/* 功能介紹卡片 */}
-            <FeatureCards onSelect={setSelectedFeature} />
+            {/* 功能介紹卡片：先載入最新資料再開啟 Modal，確保已平倉／R 值即時 */}
+            <FeatureCards onSelect={async (key) => { await loadData(); setSelectedFeature(key); }} />
 
             {/* 資料統計 Modal */}
             {selectedFeature && (

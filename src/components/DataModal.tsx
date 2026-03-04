@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { createChart, createSeriesMarkers, CandlestickSeries } from 'lightweight-charts';
+import { createChart, createSeriesMarkers, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import type { Trade, Position } from '@/lib/types';
 import { getStockMarketByCode } from '@/data/stockList';
 
-type ChartCandle = { date: string; open: number; high: number; low: number; close: number; entry?: number; exit?: number };
+type ChartCandle = { date: string; open: number; high: number; low: number; close: number; volume?: number; entry?: number; exit?: number };
 
 interface DataModalProps {
   isOpen: boolean;
@@ -28,6 +28,7 @@ export default function DataModal({
   accountBalance,
   initialCapital,
   onUpdateCapital,
+  onRefreshData,
 }: DataModalProps) {
   const [isEditingCapital, setIsEditingCapital] = useState(false);
   const [editingNotePositionId, setEditingNotePositionId] = useState<string | null>(null);
@@ -37,6 +38,7 @@ export default function DataModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    onRefreshData?.();
     fetch('/api/position-notes')
       .then(r => r.ok ? r.json() : {})
       .then((data: unknown) => setPositionNotes(typeof data === 'object' && data && !Array.isArray(data) ? (data as Record<string, string>) : {}))
@@ -93,13 +95,14 @@ export default function DataModal({
       const entryStr = entryDate.toLocaleDateString('sv');
       const exitStr = exitDate.toLocaleDateString('sv');
       const data: ChartCandle[] = raw
-        .map((d: { date?: string; open?: number | null; high?: number | null; low?: number | null; close?: number | null }) => {
+        .map((d: { date?: string; open?: number | null; high?: number | null; low?: number | null; close?: number | null; volume?: number | null }) => {
           const o = d.open != null ? Number(d.open) : NaN;
           const h = d.high != null ? Number(d.high) : NaN;
           const l = d.low != null ? Number(d.low) : NaN;
           const c = d.close != null ? Number(d.close) : NaN;
           if (!d.date || isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) return null;
-          const candle: ChartCandle = { date: d.date, open: o, high: h, low: l, close: c };
+          const vol = d.volume != null ? Number(d.volume) : undefined;
+          const candle: ChartCandle = { date: d.date, open: o, high: h, low: l, close: c, volume: vol && !isNaN(vol) ? vol : undefined };
           if (d.date === entryStr) candle.entry = position.avgEntryPrice;
           if (d.date === exitStr) candle.exit = position.avgExitPrice!;
           return candle;
@@ -163,7 +166,7 @@ export default function DataModal({
       height: 280,
       layout: { background: { color: '#111827' }, textColor: '#9ca3af' },
       grid: { vertLines: { color: '#374151' }, horzLines: { color: '#374151' } },
-      rightPriceScale: { borderColor: '#4b5563', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      rightPriceScale: { borderColor: '#4b5563', scaleMargins: { top: 0.1, bottom: 0.4 } },
       timeScale: { borderColor: '#4b5563', timeVisible: true, secondsVisible: false },
     });
     chartInstanceRef.current = chart;
@@ -184,6 +187,21 @@ export default function DataModal({
       })
       .filter((d): d is NonNullable<typeof d> => d != null);
     if (validData.length > 0) candlestickSeries.setData(validData);
+    const volumeData = chartData
+      .filter(d => d.volume != null && d.volume > 0)
+      .map(d => ({
+        time: d.date,
+        value: d.volume!,
+        color: d.close >= d.open ? '#ef4444' : '#22c55e',
+      }));
+    if (volumeData.length > 0) {
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+      });
+      volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.7, bottom: 0 } });
+      volumeSeries.setData(volumeData);
+    }
     const markers: { time: string; position: 'belowBar' | 'aboveBar'; color: string; shape: 'arrowUp' | 'arrowDown'; text: string }[] = [];
     const entryCandle = chartData.find(d => d.entry != null);
     if (entryCandle) markers.push({ time: entryCandle.date, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: `進場 ${chartPosition?.avgEntryPrice?.toLocaleString() ?? ''}` });

@@ -73,7 +73,7 @@ export function calculatePerformanceMetrics(
   const winningTrades = winningPositions.length;
   const losingTrades = losingPositions.length;
   
-  // 勝率
+  // 勝率：依平倉紀錄的正負比數（獲利筆數 / 平倉總筆數）
   const winRate = (winningTrades / totalTrades) * 100;
   
   // 總損益

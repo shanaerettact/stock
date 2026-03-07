@@ -275,6 +275,7 @@ export default function DataModal({
   if (!isOpen) return null;
 
   // 計算績效指標
+  // 績效與勝率：依平倉紀錄的正負比數（獲利筆數 / 平倉筆數）
   const calculatePerformance = () => {
     const closedPositions = positions.filter(p => p.status === 'CLOSED');
     const winPositions = closedPositions.filter(p => (p.totalPnL || 0) > 0);
@@ -296,7 +297,7 @@ export default function DataModal({
     return { winRate, totalPnL, avgWin, avgLoss, profitRatio, closedPositions };
   };
 
-  // 計算月度統計（依平倉月份，無 exitDate 時用 entryDate）
+  // 計算月度統計（依平倉紀錄、平倉月份；勝率為該月平倉筆數之正負比）
   const calculateMonthlyStats = () => {
     type Pos = Position & { exitDate?: string | Date; holdingDays?: number | null };
     const closed = positions.filter(p => p.status === 'CLOSED') as Pos[];
@@ -361,7 +362,7 @@ export default function DataModal({
       const avgLossPct = d.lossReturnRates.length > 0 ? d.lossReturnRates.reduce((a, b) => a + b, 0) / d.lossReturnRates.length : null;
       const maxWinPct = d.winReturnRates.length > 0 ? Math.max(...d.winReturnRates) : null;
       const maxLossPct = d.lossReturnRates.length > 0 ? Math.min(...d.lossReturnRates) : null;
-      const winRate = d.trades > 0 ? (d.wins / d.trades) * 100 : 0;
+      const winRate = d.trades > 0 ? (d.wins / d.trades) * 100 : 0; // 該月平倉筆數之正負比
       const avgHoldingWin = d.holdingDaysWin.length > 0 ? d.holdingDaysWin.reduce((a, b) => a + b, 0) / d.holdingDaysWin.length : null;
       const avgHoldingLoss = d.holdingDaysLoss.length > 0 ? d.holdingDaysLoss.reduce((a, b) => a + b, 0) / d.holdingDaysLoss.length : null;
       map[month] = { trades: d.trades, pnl: d.pnl, avgWinPct, avgLossPct, maxWinPct, maxLossPct, winRate, avgHoldingWin, avgHoldingLoss };
@@ -446,11 +447,11 @@ export default function DataModal({
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-gradient-to-br from-green-900/30 to-green-900/50 rounded-lg p-4 border border-green-800">
-                <div className="text-sm text-gray-400">勝率</div>
+                <div className="text-sm text-gray-400">勝率（依平倉紀錄正負比）</div>
                 <div className="text-3xl font-bold text-green-400">{performance.winRate}%</div>
                 <div className="text-xs text-gray-500 mt-1">
                   {performance.closedPositions.filter(p => (p.totalPnL || 0) > 0).length} 勝 / 
-                  {performance.closedPositions.length} 場
+                  {performance.closedPositions.length} 筆平倉
                 </div>
               </div>
               
@@ -1134,8 +1135,8 @@ export default function DataModal({
                 <tr>
                   <th className={th}>月份</th>
                   <th className={th}>總損益</th>
-                  <th className={th}>交易總比數</th>
-                  <th className={th}>勝率</th>
+                  <th className={th}>平倉筆數</th>
+                  <th className={th}>勝率（平倉正負比）</th>
                   <th className={th}>平均獲利</th>
                   <th className={th}>平均虧損</th>
                   <th className={th}>最大獲利</th>

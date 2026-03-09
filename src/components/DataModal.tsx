@@ -37,6 +37,9 @@ export default function DataModal({
   const [savingNote, setSavingNote] = useState(false);
 
   useEffect(() => {
+    if (!isOpen || type !== 'performance') setPerformanceDetailView(null);
+  }, [isOpen, type]);
+  useEffect(() => {
     if (!isOpen) return;
     onRefreshData?.();
     fetch('/api/position-notes')
@@ -52,6 +55,7 @@ export default function DataModal({
   const [chartError, setChartError] = useState<string | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const [performanceDetailView, setPerformanceDetailView] = useState<'win' | 'loss' | null>(null);
 
   const openChart = useCallback(async (position: Position) => {
     if (position.status !== 'CLOSED') return;
@@ -469,6 +473,30 @@ export default function DataModal({
                 </div>
               </div>
               
+              <div className="bg-green-900/30 rounded-lg p-4 border border-green-700">
+                <div className="text-sm text-gray-400">勝場</div>
+                <button
+                  type="button"
+                  onClick={() => setPerformanceDetailView(performanceDetailView === 'win' ? null : 'win')}
+                  className="text-2xl font-bold text-green-400 hover:underline focus:outline-none"
+                >
+                  {performance.closedPositions.filter(p => (p.totalPnL || 0) > 0).length}
+                </button>
+                <div className="text-xs text-gray-500 mt-1">獲利平倉筆數（點數字看明細）</div>
+              </div>
+              
+              <div className="bg-red-900/30 rounded-lg p-4 border border-red-700">
+                <div className="text-sm text-gray-400">敗場</div>
+                <button
+                  type="button"
+                  onClick={() => setPerformanceDetailView(performanceDetailView === 'loss' ? null : 'loss')}
+                  className="text-2xl font-bold text-red-400 hover:underline focus:outline-none"
+                >
+                  {performance.closedPositions.filter(p => (p.totalPnL || 0) < 0).length}
+                </button>
+                <div className="text-xs text-gray-500 mt-1">虧損平倉筆數（點數字看明細）</div>
+              </div>
+              
               <div className="bg-gradient-to-br from-purple-900/30 to-purple-900/50 rounded-lg p-4 border border-purple-800">
                 <div className="text-sm text-gray-400">平均獲利</div>
                 <div className="text-2xl font-bold text-purple-400">
@@ -491,6 +519,60 @@ export default function DataModal({
                 </div>
               </div>
             </div>
+            {performanceDetailView && (() => {
+              const list = performanceDetailView === 'win'
+                ? performance.closedPositions.filter(p => (p.totalPnL || 0) > 0)
+                : performance.closedPositions.filter(p => (p.totalPnL || 0) < 0);
+              const th = 'px-3 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider border-b border-gray-600';
+              const td = 'px-3 py-2 text-sm text-gray-300 border-b border-gray-700/80';
+              return (
+                <div className="mt-4 rounded-lg border border-gray-600 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2 bg-gray-800/80 border-b border-gray-600">
+                    <span className="text-sm font-medium text-gray-300">
+                      {performanceDetailView === 'win' ? '勝場' : '敗場'}明細（{list.length} 筆）
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPerformanceDetailView(null)}
+                      className="text-xs text-gray-400 hover:text-white"
+                    >
+                      關閉
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto max-h-[50vh] overflow-y-auto">
+                    <table className="w-full min-w-[600px]">
+                      <thead className="sticky top-0 bg-gray-800 z-10">
+                        <tr>
+                          <th className={th + ' sticky left-0 z-10 bg-gray-800 whitespace-nowrap'}>股票</th>
+                          <th className={th + ' whitespace-nowrap'}>進場價格</th>
+                          <th className={th + ' whitespace-nowrap'}>進場日期</th>
+                          <th className={th + ' whitespace-nowrap'}>出場價格</th>
+                          <th className={th + ' whitespace-nowrap'}>出場日期</th>
+                          <th className={th}>備註</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {list.map((p) => {
+                          const noteText = (positionNotes[p.id] ?? p.notes ?? '') || '—';
+                          return (
+                            <tr key={p.id} className="group hover:bg-gray-800/50">
+                              <td className={td + ' sticky left-0 z-[1] bg-gray-900 group-hover:bg-gray-800/50 whitespace-nowrap border-r border-gray-700 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.3)]'}>{p.stockCode} {p.stockName ?? ''}</td>
+                              <td className={td + ' whitespace-nowrap'}>{p.avgEntryPrice?.toLocaleString() ?? '—'}</td>
+                              <td className={td + ' whitespace-nowrap'}>{p.entryDate ? new Date(p.entryDate).toLocaleDateString('zh-TW') : '—'}</td>
+                              <td className={td + ' whitespace-nowrap'}>{p.avgExitPrice != null ? p.avgExitPrice.toLocaleString() : '—'}</td>
+                              <td className={td + ' whitespace-nowrap'}>{p.exitDate ? new Date(p.exitDate).toLocaleDateString('zh-TW') : '—'}</td>
+                              <td className={td + ' min-w-[120px] max-w-[400px] whitespace-normal break-words align-top'} title={noteText !== '—' ? noteText : undefined}>
+                                {noteText}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
 

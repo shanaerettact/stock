@@ -35,9 +35,6 @@ export function validatePrice(price: string | number): ValidationResult {
   if (numPrice <= 0) {
     return { isValid: false, error: '價格必須大於 0' };
   }
-  if (numPrice > 10000) {
-    return { isValid: false, error: '價格似乎過高，請確認' };
-  }
   return { isValid: true };
 }
 

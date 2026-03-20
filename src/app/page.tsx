@@ -75,7 +75,14 @@ export default function HomePage() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || '操作失敗');
+        const fieldErrors = errorData.errors as Record<string, string> | undefined;
+        const detail =
+          fieldErrors && Object.keys(fieldErrors).length > 0
+            ? Object.entries(fieldErrors)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join('；')
+            : errorData.error || '操作失敗';
+        throw new Error(detail);
       }
 
       showMessage('success', editingTrade ? '✅ 交易記錄更新成功！' : '✅ 交易記錄新增成功！');

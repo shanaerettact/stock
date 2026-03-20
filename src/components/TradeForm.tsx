@@ -150,8 +150,6 @@ export default function TradeForm({
       newErrors.price = '請輸入有效的價格';
     } else if (price <= 0) {
       newErrors.price = '價格必須大於 0';
-    } else if (price > 10000) {
-      newErrors.price = '價格似乎過高，請確認';
     }
     
     // 數量驗證（根據單位顯示不同訊息）
@@ -342,7 +340,7 @@ export default function TradeForm({
           <div className="relative">
             <input
               type="number"
-              step="0.01"
+              step="any"
               value={formData.price}
               onChange={(e) => handleChange('price', e.target.value)}
               placeholder="0.00"

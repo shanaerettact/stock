@@ -31,7 +31,6 @@ export default function DataModal({
   onRefreshData,
 }: DataModalProps) {
   const [isEditingCapital, setIsEditingCapital] = useState(false);
-  const [editingNotePositionId, setEditingNotePositionId] = useState<string | null>(null);
   const [editingNoteValue, setEditingNoteValue] = useState('');
   const [positionNotes, setPositionNotes] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState(false);
@@ -65,6 +64,7 @@ export default function DataModal({
       return;
     }
     setChartPosition(position);
+    setEditingNoteValue(positionNotes[position.id] ?? position.notes ?? '');
     setChartError(null);
     setChartData([]);
     setChartLoading(true);
@@ -121,23 +121,19 @@ export default function DataModal({
     } finally {
       setChartLoading(false);
     }
-  }, []);
+  }, [positionNotes]);
 
   const closeChart = useCallback(() => {
     setChartPosition(null);
     setChartData([]);
     setChartError(null);
-  }, []);
-
-  const startEditNote = useCallback((position: Position) => {
-    setEditingNotePositionId(position.id);
-    setEditingNoteValue(positionNotes[position.id] ?? position.notes ?? '');
-  }, [positionNotes]);
-
-  const cancelEditNote = useCallback(() => {
-    setEditingNotePositionId(null);
     setEditingNoteValue('');
   }, []);
+
+  const resetChartNoteDraft = useCallback(() => {
+    if (!chartPosition) return;
+    setEditingNoteValue(positionNotes[chartPosition.id] ?? chartPosition.notes ?? '');
+  }, [chartPosition, positionNotes]);
 
   const saveNote = useCallback(async (positionId: string) => {
     const value = editingNoteValue.trim();
@@ -152,8 +148,7 @@ export default function DataModal({
       const next = { ...positionNotes, [positionId]: value };
       if (!value) delete next[positionId];
       setPositionNotes(next);
-      setEditingNotePositionId(null);
-      setEditingNoteValue('');
+      setEditingNoteValue(value);
     } catch (e) {
       console.warn('備註儲存失敗', e);
     } finally {
@@ -983,17 +978,6 @@ export default function DataModal({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => startEditNote(position)}
-                          className="px-2 py-1 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors flex items-center gap-1"
-                          title="編輯備註"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          備註
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => openChart(position)}
                           className="px-2 py-1 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors flex items-center gap-1"
                           title="查看日線圖（進出場標註）"
@@ -1014,41 +998,11 @@ export default function DataModal({
                     <div className="text-sm text-gray-400 mt-1">
                       報酬率：{(position.returnRate || 0).toFixed(2)}%
                     </div>
-                    {editingNotePositionId === position.id ? (
-                      <div className="mt-3">
-                        <textarea
-                          value={editingNoteValue}
-                          onChange={e => setEditingNoteValue(e.target.value)}
-                          placeholder="輸入備註..."
-                          className="w-full px-3 py-2 text-sm bg-gray-800 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[60px]"
-                          rows={3}
-                          autoFocus
-                        />
-                        <div className="flex gap-2 mt-2">
-                          <button
-                            type="button"
-                            onClick={() => saveNote(position.id)}
-                            disabled={savingNote}
-                            className="px-3 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded"
-                          >
-                            {savingNote ? '儲存中...' : '儲存'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={cancelEditNote}
-                            className="px-3 py-1 text-xs font-medium bg-gray-600 hover:bg-gray-500 text-gray-200 rounded"
-                          >
-                            取消
-                          </button>
-                        </div>
+                    {(positionNotes[position.id] ?? position.notes) ? (
+                      <div className="mt-2 text-sm text-gray-300 bg-gray-800/50 rounded px-3 py-2 whitespace-pre-wrap border border-gray-700/60">
+                        {positionNotes[position.id] ?? position.notes}
                       </div>
-                    ) : (
-                      ((positionNotes[position.id] ?? position.notes) && (
-                        <div className="mt-2 text-sm text-gray-300 bg-gray-800/50 rounded px-3 py-2 whitespace-pre-wrap">
-                          {positionNotes[position.id] ?? position.notes}
-                        </div>
-                      ))
-                    )}
+                    ) : null}
                   </div>
                 ))}
                 
@@ -1300,8 +1254,8 @@ export default function DataModal({
           {renderContent()}
 
           {chartPosition && (
-            <div className="absolute inset-0 top-0 left-0 right-0 bottom-0 bg-gray-900 z-20 rounded-lg border border-gray-700 flex flex-col -m-6 p-6">
-              <div className="flex justify-between items-center mb-3">
+            <div className="absolute inset-0 top-0 left-0 right-0 bottom-0 bg-gray-900 z-20 rounded-lg border border-gray-700 flex flex-col -m-6 p-6 min-h-0 overflow-y-auto">
+              <div className="flex justify-between items-center mb-3 shrink-0">
                 <h4 className="font-semibold text-gray-200">
                   {chartPosition.stockCode} {chartPosition.stockName || ''} 日線圖
                 </h4>
@@ -1331,11 +1285,38 @@ export default function DataModal({
                 )}
               </div>
               {!chartLoading && !chartError && chartData.length > 0 && chartPosition && (
-                <div className="flex gap-4 mt-2 text-sm text-gray-400">
+                <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-400 shrink-0">
                   <span>進場：{new Date(chartPosition.entryDate).toLocaleDateString('zh-TW')} @ {chartPosition.avgEntryPrice.toLocaleString()}</span>
                   <span>出場：{chartPosition.exitDate ? new Date(chartPosition.exitDate).toLocaleDateString('zh-TW') : '-'} @ {(chartPosition.avgExitPrice ?? 0).toLocaleString()}</span>
                 </div>
               )}
+              <div className="mt-3 pt-3 border-t border-gray-700 shrink-0">
+                <div className="text-sm font-medium text-gray-300 mb-2">備註</div>
+                <textarea
+                  value={editingNoteValue}
+                  onChange={e => setEditingNoteValue(e.target.value)}
+                  placeholder="輸入備註..."
+                  className="w-full px-3 py-2 text-sm bg-gray-800 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[72px]"
+                  rows={3}
+                />
+                <div className="flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => saveNote(chartPosition.id)}
+                    disabled={savingNote}
+                    className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded"
+                  >
+                    {savingNote ? '儲存中...' : '儲存'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetChartNoteDraft}
+                    className="px-3 py-1.5 text-xs font-medium bg-gray-600 hover:bg-gray-500 text-gray-200 rounded"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

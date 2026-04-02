@@ -33,8 +33,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# prisma
-prisma/*.db
+# prisma（dev.db 納入版控；journal 仍忽略）
 prisma/*.db-journal
 prisma/migrations/
 

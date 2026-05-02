@@ -1,8 +1,8 @@
 /**
  * 股票收盤價 API 路由
- * 從 TWSE OpenAPI (上市) 和 TPEX OpenAPI (上櫃) 取得當日收盤價
- * https://openapi.twse.com.tw/
- * https://www.tpex.org.tw/openapi/
+ * 台股：TWSE OpenAPI（上市）、TPEX OpenAPI（上櫃）
+ * 美股：Yahoo Finance Chart API（query1.finance.yahoo.com/v8/finance/chart），免金鑰；亦適用歷史日線
+ * 其他商業來源可選：Finnhub、Alpha Vantage、FMP 等（需 API key）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -44,7 +44,7 @@ export interface StockPriceResult {
   highestPrice: number | null;
   lowestPrice: number | null;
   tradeVolume: number | null;
-  market: 'TWSE' | 'TPEX' | null;  // 上市/上櫃
+  market: 'TWSE' | 'TPEX' | 'US' | null;  // 上市/上櫃/美股（Yahoo Chart）
   error?: string;
   // 52 周新高相關
   is52WeekHigh?: boolean;        // 是否創 52 周新高
@@ -96,6 +96,121 @@ function rocDateToIso(rocStr: string): string {
 function parseYearMonth(isoDate: string): { y: number; m: number } {
   const parts = isoDate.split('-').map(Number);
   return { y: parts[0] ?? 1970, m: parts[1] ?? 1 };
+}
+
+/** 是否為美股Ticker（與 TradeForm 美股代號規則一致；不含 .TW） */
+function isUsTickerSymbol(code: string): boolean {
+  return /^[A-Z]{1,10}(\.[A-Z]{1,2})?$/i.test(code.trim());
+}
+
+const YAHOO_CHART_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+/**
+ * 美股日線歷史（Yahoo Finance Chart API，無需 API key）
+ * @see https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}
+ */
+async function fetchYahooUsHistory(
+  symbol: string,
+  startDate: string,
+  endDate: string
+): Promise<HistoryCandle[]> {
+  const sym = symbol.trim();
+  const startTs = Math.floor(new Date(startDate).getTime() / 1000);
+  const endTs = Math.floor(new Date(endDate + 'T23:59:59').getTime() / 1000);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?period1=${startTs}&period2=${endTs}&interval=1d`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': YAHOO_CHART_UA, Accept: 'application/json' },
+      next: { revalidate: 3600 },
+    });
+    const json = await res.json();
+    const chart = json?.chart?.result?.[0];
+    if (!chart?.timestamp?.length) return [];
+    const q = chart.indicators?.quote?.[0] ?? {};
+    const result: HistoryCandle[] = [];
+    for (let i = 0; i < chart.timestamp.length; i++) {
+      const o = q.open?.[i];
+      const h = q.high?.[i];
+      const l = q.low?.[i];
+      const c = q.close?.[i];
+      const vol = q.volume?.[i];
+      if (o == null || h == null || l == null || c == null) continue;
+      const d = new Date(chart.timestamp[i] * 1000);
+      const dateIso = d.toISOString().slice(0, 10);
+      if (dateIso < startDate || dateIso > endDate) continue;
+      const volNum =
+        vol != null && typeof vol === 'number' && !isNaN(vol) ? Math.round(vol) : undefined;
+      result.push({ date: dateIso, open: o, high: h, low: l, close: c, volume: volNum });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+/** 美股即時／最近收盤（Yahoo Chart，range 約 1 個月日線） */
+async function fetchYahooUsQuote(symbol: string): Promise<StockPriceResult | null> {
+  const sym = symbol.trim().toUpperCase();
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1mo`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': YAHOO_CHART_UA, Accept: 'application/json' },
+      next: { revalidate: 120 },
+    });
+    const json = await res.json();
+    const err = json?.chart?.error;
+    if (err) return null;
+    const chart = json?.chart?.result?.[0];
+    if (!chart) return null;
+    const meta = chart.meta ?? {};
+    const q = chart.indicators?.quote?.[0] ?? {};
+    const ts: number[] = chart.timestamp ?? [];
+    let lastClose: number | null = null;
+    let lastOpen: number | null = null;
+    let lastHigh: number | null = null;
+    let lastLow: number | null = null;
+    let lastVol: number | null = null;
+    for (let i = ts.length - 1; i >= 0; i--) {
+      const c = q.close?.[i];
+      if (c != null && typeof c === 'number' && !isNaN(c)) {
+        lastClose = c;
+        lastOpen = q.open?.[i] ?? null;
+        lastHigh = q.high?.[i] ?? null;
+        lastLow = q.low?.[i] ?? null;
+        const v = q.volume?.[i];
+        lastVol = v != null && typeof v === 'number' && !isNaN(v) ? Math.round(v) : null;
+        break;
+      }
+    }
+    const price =
+      typeof meta.regularMarketPrice === 'number' && !isNaN(meta.regularMarketPrice)
+        ? meta.regularMarketPrice
+        : lastClose;
+    if (price == null || typeof price !== 'number' || isNaN(price)) return null;
+    const prevClose =
+      typeof meta.chartPreviousClose === 'number' && !isNaN(meta.chartPreviousClose)
+        ? meta.chartPreviousClose
+        : typeof meta.previousClose === 'number' && !isNaN(meta.previousClose)
+          ? meta.previousClose
+          : null;
+    const change = prevClose != null ? price - prevClose : null;
+    const name = String(meta.longName || meta.shortName || sym);
+
+    return {
+      stockCode: sym,
+      stockName: name,
+      closingPrice: price,
+      change,
+      openingPrice: lastOpen,
+      highestPrice: lastHigh,
+      lowestPrice: lastLow,
+      tradeVolume: lastVol,
+      market: 'US',
+    };
+  } catch {
+    return null;
+  }
 }
 
 // 證交所 TWSE 個股日成交（上市股票）https://www.twse.com.tw/exchangeReport/STOCK_DAY
@@ -237,6 +352,11 @@ async function fetchHistory(
   endDate: string,
   market: '上市' | '上櫃' | null
 ): Promise<{ history: HistoryCandle[]; sourcesTried: FetchSource[] }> {
+  if (isUsTickerSymbol(stockCode)) {
+    const history = await fetchYahooUsHistory(stockCode.trim(), startDate, endDate);
+    return { history, sourcesTried: ['Yahoo'] };
+  }
+
   const sourcesTried: FetchSource[] = [];
   let history: HistoryCandle[] = [];
 
@@ -375,6 +495,12 @@ export async function GET(request: NextRequest) {
 
     const stockCodes = codesParam.split(',').map(code => code.trim());
 
+    const needsTwQuotes = stockCodes.some((code) => !isUsTickerSymbol(code));
+
+    let twseData: TWSEStockData[] = [];
+    let tpexData: TPEXStockData[] = [];
+
+    if (needsTwQuotes) {
     // 同時取得上市和上櫃股票資料
     const [twseResponse, tpexResponse] = await Promise.all([
       // TWSE 上市股票
@@ -395,9 +521,6 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
-    let twseData: TWSEStockData[] = [];
-    let tpexData: TPEXStockData[] = [];
-
     // 解析 TWSE 資料
     if (twseResponse?.ok) {
       try {
@@ -415,57 +538,76 @@ export async function GET(request: NextRequest) {
         console.error('解析 TPEX 資料失敗:', e);
       }
     }
+    }
 
-    // 過濾出需要的股票（先取得基本資料）
-    const basicResults: StockPriceResult[] = stockCodes.map(code => {
-      // 先從 TWSE 找
-      const twseStock = twseData.find(stock => stock.Code === code);
-      
-      if (twseStock) {
+    // 過濾出需要的股票（台股：TWSE/TPEX；美股：Yahoo Finance Chart API）
+    const basicResults: StockPriceResult[] = await Promise.all(
+      stockCodes.map(async (code) => {
+        const c = code.trim();
+        if (isUsTickerSymbol(c)) {
+          const us = await fetchYahooUsQuote(c);
+          if (us) return us;
+          return {
+            stockCode: c.toUpperCase(),
+            stockName: '',
+            closingPrice: null,
+            change: null,
+            openingPrice: null,
+            highestPrice: null,
+            lowestPrice: null,
+            tradeVolume: null,
+            market: null,
+            error:
+              '美股行情取得失敗（資料來源：Yahoo Finance Chart；請確認代號如 AAPL、GOOG、BRK.B）',
+          };
+        }
+
+        const twseStock = twseData.find((stock) => stock.Code === c);
+
+        if (twseStock) {
+          return {
+            stockCode: twseStock.Code,
+            stockName: twseStock.Name,
+            closingPrice: parsePrice(twseStock.ClosingPrice),
+            change: parsePrice(twseStock.Change),
+            openingPrice: parsePrice(twseStock.OpeningPrice),
+            highestPrice: parsePrice(twseStock.HighestPrice),
+            lowestPrice: parsePrice(twseStock.LowestPrice),
+            tradeVolume: parseVolume(twseStock.TradeVolume),
+            market: 'TWSE' as const,
+          };
+        }
+
+        const tpexStock = tpexData.find((stock) => stock.SecuritiesCompanyCode === c);
+
+        if (tpexStock) {
+          return {
+            stockCode: tpexStock.SecuritiesCompanyCode,
+            stockName: tpexStock.CompanyName,
+            closingPrice: parsePrice(tpexStock.Close),
+            change: parsePrice(tpexStock.Change),
+            openingPrice: parsePrice(tpexStock.Open),
+            highestPrice: parsePrice(tpexStock.High),
+            lowestPrice: parsePrice(tpexStock.Low),
+            tradeVolume: parseVolume(tpexStock.TradingShares),
+            market: 'TPEX' as const,
+          };
+        }
+
         return {
-          stockCode: twseStock.Code,
-          stockName: twseStock.Name,
-          closingPrice: parsePrice(twseStock.ClosingPrice),
-          change: parsePrice(twseStock.Change),
-          openingPrice: parsePrice(twseStock.OpeningPrice),
-          highestPrice: parsePrice(twseStock.HighestPrice),
-          lowestPrice: parsePrice(twseStock.LowestPrice),
-          tradeVolume: parseVolume(twseStock.TradeVolume),
-          market: 'TWSE' as const,
+          stockCode: c,
+          stockName: '',
+          closingPrice: null,
+          change: null,
+          openingPrice: null,
+          highestPrice: null,
+          lowestPrice: null,
+          tradeVolume: null,
+          market: null,
+          error: '找不到該股票資料（可能為興櫃或已下市）',
         };
-      }
-
-      // 再從 TPEX 找
-      const tpexStock = tpexData.find(stock => stock.SecuritiesCompanyCode === code);
-      
-      if (tpexStock) {
-        return {
-          stockCode: tpexStock.SecuritiesCompanyCode,
-          stockName: tpexStock.CompanyName,
-          closingPrice: parsePrice(tpexStock.Close),
-          change: parsePrice(tpexStock.Change),
-          openingPrice: parsePrice(tpexStock.Open),
-          highestPrice: parsePrice(tpexStock.High),
-          lowestPrice: parsePrice(tpexStock.Low),
-          tradeVolume: parseVolume(tpexStock.TradingShares),
-          market: 'TPEX' as const,
-        };
-      }
-
-      // 都找不到
-      return {
-        stockCode: code,
-        stockName: '',
-        closingPrice: null,
-        change: null,
-        openingPrice: null,
-        highestPrice: null,
-        lowestPrice: null,
-        tradeVolume: null,
-        market: null,
-        error: '找不到該股票資料（可能為興櫃或已下市）',
-      };
-    });
+      })
+    );
 
     // 為每支股票計算進階指標（52 周新高、50 日平均交易量）
     const results: StockPriceResult[] = await Promise.all(

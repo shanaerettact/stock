@@ -53,7 +53,7 @@ export interface StockPrice {
   stockName: string;
   closingPrice: number | null;
   change: number | null;
-  market: 'TWSE' | 'TPEX' | null;
+  market: 'TWSE' | 'TPEX' | 'US' | null;
   error?: string;
   // 52 周新高相關
   is52WeekHigh?: boolean;        // 是否創 52 周新高

@@ -348,11 +348,13 @@ function ClosingPriceCell({ closingPrice, priceData, currencySuffix = '元' }: {
         </span>
         {priceData?.market && (
           <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-            priceData.market === 'TWSE' 
-              ? 'bg-blue-900/50 text-blue-400' 
-              : 'bg-purple-900/50 text-purple-400'
+            priceData.market === 'TWSE'
+              ? 'bg-blue-900/50 text-blue-400'
+              : priceData.market === 'TPEX'
+              ? 'bg-purple-900/50 text-purple-400'
+              : 'bg-amber-900/50 text-amber-400'
           }`}>
-            {priceData.market === 'TWSE' ? '上市' : '上櫃'}
+            {priceData.market === 'TWSE' ? '上市' : priceData.market === 'TPEX' ? '上櫃' : '美股'}
           </span>
         )}
       </div>

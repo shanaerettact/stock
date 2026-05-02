@@ -17,10 +17,21 @@ export function validateRequired(value: string, fieldName: string): ValidationRe
 }
 
 export function validateStockCode(code: string): ValidationResult {
+  return validateStockCodeForMarket(code, 'TW');
+}
+
+export function validateStockCodeForMarket(code: string, market: 'TW' | 'US'): ValidationResult {
   if (!code || code.trim() === '') {
     return { isValid: false, error: '請輸入股票代號' };
   }
-  if (!/^\d{4,6}$/.test(code.trim())) {
+  const c = code.trim();
+  if (market === 'US') {
+    if (!/^[A-Z]{1,10}(\.[A-Z]{1,2})?$/i.test(c)) {
+      return { isValid: false, error: '美股代號格式錯誤（例如 AAPL、BRK.B）' };
+    }
+    return { isValid: true };
+  }
+  if (!/^\d{4,6}$/.test(c)) {
     return { isValid: false, error: '股票代號格式錯誤（應為 4-6 位數字）' };
   }
   return { isValid: true };
@@ -109,6 +120,7 @@ export interface TradeFormInput {
   quantity: string;
   unit?: 'SHARES' | 'LOTS';
   plannedStopLoss?: string;
+  market?: 'TW' | 'US';
 }
 
 export interface TradeFormErrors {
@@ -125,7 +137,8 @@ export function validateTradeForm(data: TradeFormInput): {
 } {
   const errors: TradeFormErrors = {};
   
-  const stockCodeResult = validateStockCode(data.stockCode);
+  const market = data.market === 'US' ? 'US' : 'TW';
+  const stockCodeResult = validateStockCodeForMarket(data.stockCode, market);
   if (!stockCodeResult.isValid) errors.stockCode = stockCodeResult.error;
   
   const priceResult = validatePrice(data.price);

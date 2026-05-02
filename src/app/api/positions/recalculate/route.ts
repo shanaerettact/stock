@@ -9,7 +9,8 @@ import { prisma } from '@/lib/prisma';
 /**
  * 將交易數量轉換為股數
  */
-function convertToShares(quantity: number, unit: string): number {
+function convertToShares(quantity: number, unit: string, market: string): number {
+  if (market === 'US') return quantity;
   return unit === 'LOTS' ? quantity * 1000 : quantity;
 }
 
@@ -18,6 +19,7 @@ interface TradeRecord {
   tradeType: string;
   quantity: number;
   unit: string;
+  market: string;
   price: number;
   amount: number;
   commission: number;
@@ -45,9 +47,11 @@ async function recalculatePosition(positionId: string) {
     return { positionId, status: 'NO_TRADES' };
   }
 
+  const m = position?.market ?? (trades[0] as TradeRecord).market ?? 'TW';
+
   // 計算買入交易（將數量轉換為股數）
   const buyTrades = trades.filter((t: TradeRecord) => t.tradeType === 'BUY');
-  const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit), 0);
+  const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit, m), 0);
   const totalBuyAmount = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
   const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
@@ -66,7 +70,7 @@ async function recalculatePosition(positionId: string) {
 
   // 計算賣出交易（將數量轉換為股數）
   const sellTrades = trades.filter((t: TradeRecord) => t.tradeType === 'SELL');
-  const totalSellQuantity = sellTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit), 0);
+  const totalSellQuantity = sellTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit, m), 0);
   const totalSellAmount = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalSellCommission = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
   const totalSellTax = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.tax, 0);
@@ -164,6 +168,7 @@ export async function POST(request: NextRequest) {
         where: {
           accountId,
           stockCode: trade.stockCode,
+          market: trade.market ?? 'TW',
         },
         orderBy: [
           { status: 'asc' }, // OPEN 優先
@@ -225,8 +230,9 @@ async function recalculateAccountBalance(accountId: string) {
   }
 
   // 查詢該帳戶的所有交易記錄
+  // 僅以台股交易重算帳戶餘額（美股幣別不同，不計入同一餘額）
   const allTrades = await prisma.trade.findMany({
-    where: { accountId },
+    where: { accountId, market: 'TW' },
     orderBy: { tradeDate: 'asc' },
   });
 

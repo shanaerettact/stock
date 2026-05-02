@@ -11,6 +11,7 @@ const ACCOUNT_ID = 'cmj47funv00007jwbtrkd22t9';
 
 export default function HomePage() {
   const [showForm, setShowForm] = useState(false);
+  const [activeMarket, setActiveMarket] = useState<'TW' | 'US'>('TW');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -35,8 +36,8 @@ export default function HomePage() {
       // 添加時間戳防止快取
       const timestamp = Date.now();
       const [tradesRes, positionsRes, accountRes] = await Promise.all([
-        fetch(`/api/trades?accountId=${ACCOUNT_ID}&_t=${timestamp}`, { cache: 'no-store' }),
-        fetch(`/api/positions?accountId=${ACCOUNT_ID}&_t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/trades?accountId=${ACCOUNT_ID}&market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/positions?accountId=${ACCOUNT_ID}&market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' }),
         fetch(`/api/account?_t=${timestamp}`, { cache: 'no-store' })
       ]);
       
@@ -54,7 +55,7 @@ export default function HomePage() {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [activeMarket]);
 
   // 開啟功能 Modal 時重新載入，確保 DataModal、R 值分析等顯示最新買賣資料
   useEffect(() => {
@@ -70,7 +71,11 @@ export default function HomePage() {
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, accountId: ACCOUNT_ID }),
+        body: JSON.stringify({
+          ...data,
+          accountId: ACCOUNT_ID,
+          market: editingTrade ? ((editingTrade.market as 'TW' | 'US') || 'TW') : activeMarket,
+        }),
       });
 
       if (!response.ok) {
@@ -106,6 +111,7 @@ export default function HomePage() {
   // 編輯交易
   const handleEdit = (trade: Trade) => {
     setEditingTrade(trade);
+    setActiveMarket((trade.market === 'US' ? 'US' : 'TW'));
     setShowForm(true);
   };
 
@@ -225,6 +231,22 @@ export default function HomePage() {
         {/* 歡迎區塊 */}
         {!showForm && (
           <div className="space-y-8">
+            <div className="flex flex-wrap gap-2 border-b border-gray-700 pb-4">
+              {(['TW', 'US'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setActiveMarket(m)}
+                  className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                    activeMarket === m
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600'
+                  }`}
+                >
+                  {m === 'TW' ? '🇹🇼 台股' : '🇺🇸 美股'}
+                </button>
+              ))}
+            </div>
             {/* 快速統計 */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <StatCard label="交易總數" value={trades.length} unit="筆" color="blue" />
@@ -258,6 +280,7 @@ export default function HomePage() {
               positions={positions} 
               initialCapital={initialCapital}
               onMessage={showMessage}
+              currencySuffix={activeMarket === 'US' ? '美元' : '元'}
             />
 
             {/* 最近交易記錄 */}
@@ -267,6 +290,7 @@ export default function HomePage() {
                 onEdit={handleEdit}
                 onDelete={handleDelete}
                 deletingTradeId={deletingTradeId}
+                currencySuffix={activeMarket === 'US' ? '美元' : '元'}
               />
             )}
 
@@ -312,6 +336,8 @@ export default function HomePage() {
             editingTrade={editingTrade}
             onSubmit={handleSubmit}
             onCancel={handleCancelEdit}
+            activeMarket={activeMarket}
+            onActiveMarketChange={setActiveMarket}
           />
         )}
       </div>
@@ -382,10 +408,12 @@ function FeatureCards({ onSelect }: { onSelect: (feature: 'trades' | 'performanc
 }
 
 // 使用獨立的 wrapper 組件來避免 initialData 被重新創建
-function TradeFormWrapper({ editingTrade, onSubmit, onCancel }: {
+function TradeFormWrapper({ editingTrade, onSubmit, onCancel, activeMarket, onActiveMarketChange }: {
   editingTrade: Trade | null;
   onSubmit: (data: TradeFormData) => Promise<void>;
   onCancel: () => void;
+  activeMarket: 'TW' | 'US';
+  onActiveMarketChange: (m: 'TW' | 'US') => void;
 }) {
   // 使用 useMemo 緩存 initialData，只有當 editingTrade.id 改變時才重新創建
   const initialData = useMemo(() => {
@@ -404,26 +432,56 @@ function TradeFormWrapper({ editingTrade, onSubmit, onCancel }: {
     };
   }, [editingTrade?.id]); // 只依賴 id，避免內容變化導致重新創建
 
+  const formMarket: 'TW' | 'US' = editingTrade
+    ? ((editingTrade.market === 'US' ? 'US' : 'TW'))
+    : activeMarket;
+
   return (
     <div className="bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-700">
-      <h2 className="text-2xl font-bold text-gray-100 mb-6">
+      <h2 className="text-2xl font-bold text-gray-100 mb-2">
         {editingTrade ? '✏️ 編輯交易記錄' : '📝 新增交易記錄'}
       </h2>
+      {!editingTrade && (
+        <div className="flex gap-2 mb-6">
+          {(['TW', 'US'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onActiveMarketChange(m)}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                activeMarket === m
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600'
+              }`}
+            >
+              {m === 'TW' ? '🇹🇼 台股' : '🇺🇸 美股'}
+            </button>
+          ))}
+        </div>
+      )}
+      {editingTrade && (
+        <p className="text-sm text-gray-500 mb-6">
+          市場：{formMarket === 'US' ? '美股（美元）' : '台股（新台幣）'}
+        </p>
+      )}
       <TradeForm
         onSubmit={onSubmit}
         onCancel={onCancel}
         submitLabel={editingTrade ? '更新交易' : '新增交易'}
         initialData={initialData}
+        market={formMarket}
+        embedded
       />
     </div>
   );
 }
 
-function TradesTable({ trades, onEdit, onDelete, deletingTradeId }: {
+function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix = '元' }: {
   trades: Trade[];
   onEdit: (trade: Trade) => void;
   onDelete: (id: string) => void;
   deletingTradeId: string | null;
+  currencySuffix?: string;
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -514,12 +572,12 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId }: {
                       {trade.tradeType === 'BUY' ? '買進' : '賣出'}
                     </span>
                   </td>
-                  <td className="text-right py-3 px-4 text-gray-200">{trade.price.toLocaleString('zh-TW')} 元</td>
+                  <td className="text-right py-3 px-4 text-gray-200">{trade.price.toLocaleString('zh-TW')} {currencySuffix}</td>
                   <td className="text-right py-3 px-4 text-gray-200">
                     {trade.quantity} {trade.unit === 'SHARES' ? '股' : '張'}
                   </td>
                   <td className="text-right py-3 px-4 font-semibold text-gray-200">
-                    {trade.amount.toLocaleString('zh-TW')} 元
+                    {trade.amount.toLocaleString('zh-TW')} {currencySuffix}
                   </td>
                   <td className="text-center py-3 px-4">
                     <div className="flex items-center justify-center gap-2">

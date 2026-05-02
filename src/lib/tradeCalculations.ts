@@ -10,10 +10,13 @@ const TAX_RATE_STOCK = 0.003; // 一般股票 0.3%（賣出）
 const TAX_RATE_STOCK_DAY_TRADE = 0.0015; // 現股當沖 0.15%（賣出）
 const TAX_RATE_ETF_TDR_WARRANT = 0.001; // ETF / 權證 / TDR 0.1%（賣出）
 const SHARES_PER_LOT = 1000; // 台股一張 = 1000 股
+/** 美股賣出約當 SEC Section 31 費率（簡化，僅供試算） */
+const US_SELL_REGULATORY_FEE_RATE = 0.0000278;
 
 // ===== 型別定義 =====
 export type TradeUnit = 'SHARES' | 'LOTS'; // 零股 | 張
 export type SecurityType = 'STOCK' | 'ETF' | 'TDR' | 'WARRANT';
+export type MarketRegion = 'TW' | 'US';
 
 export interface TradeInput {
   price: number; // 成交價格（每股）
@@ -22,6 +25,7 @@ export interface TradeInput {
   tradeType: 'BUY' | 'SELL';
   securityType?: SecurityType; // 標的類型：股票/ETF/TDR/權證
   isDayTrade?: boolean; // 是否為現股當沖
+  market?: MarketRegion; // TW 台股 / US 美股
 }
 
 export interface TradeCalculation {
@@ -47,7 +51,8 @@ export interface PositionPnL {
  * @param unit 單位（零股或張）
  * @returns 總股數
  */
-export function convertToShares(quantity: number, unit: TradeUnit): number {
+export function convertToShares(quantity: number, unit: TradeUnit, market: MarketRegion = 'TW'): number {
+  if (market === 'US') return quantity;
   return unit === 'LOTS' ? quantity * SHARES_PER_LOT : quantity;
 }
 
@@ -58,8 +63,8 @@ export function convertToShares(quantity: number, unit: TradeUnit): number {
  * @param unit 單位（零股或張）
  * @returns 成交金額 = price × 總股數
  */
-export function calculateAmount(price: number, quantity: number, unit: TradeUnit = 'LOTS'): number {
-  const totalShares = convertToShares(quantity, unit);
+export function calculateAmount(price: number, quantity: number, unit: TradeUnit = 'LOTS', market: MarketRegion = 'TW'): number {
+  const totalShares = convertToShares(quantity, unit, market);
   return price * totalShares;
 }
 
@@ -68,7 +73,8 @@ export function calculateAmount(price: number, quantity: number, unit: TradeUnit
  * @param amount 成交金額
  * @returns 手續費 = amount × 0.1425% × 0.6
  */
-export function calculateCommission(amount: number, totalShares: number, unit: TradeUnit): number {
+export function calculateCommission(amount: number, totalShares: number, unit: TradeUnit, market: MarketRegion = 'TW'): number {
+  if (market === 'US') return 0;
   const commission = amount * COMMISSION_RATE * COMMISSION_DISCOUNT;
   const isOddLot = unit === 'SHARES' && totalShares < SHARES_PER_LOT;
   const minimum = isOddLot ? 1 : 20;
@@ -85,10 +91,15 @@ export function calculateTax(
   amount: number,
   tradeType: 'BUY' | 'SELL',
   securityType: SecurityType = 'STOCK',
-  isDayTrade = false
+  isDayTrade = false,
+  market: MarketRegion = 'TW'
 ): number {
   if (tradeType !== 'SELL') {
     return 0;
+  }
+
+  if (market === 'US') {
+    return Math.round(amount * US_SELL_REGULATORY_FEE_RATE * 100) / 100;
   }
 
   if (securityType === 'ETF' || securityType === 'TDR' || securityType === 'WARRANT') {
@@ -105,10 +116,11 @@ export function calculateTax(
  * @returns 完整計算結果
  */
 export function calculateTrade(input: TradeInput): TradeCalculation {
-  const totalShares = convertToShares(input.quantity, input.unit);
-  const amount = calculateAmount(input.price, input.quantity, input.unit);
-  const commission = calculateCommission(amount, totalShares, input.unit);
-  const tax = calculateTax(amount, input.tradeType, input.securityType, input.isDayTrade);
+  const market = input.market ?? 'TW';
+  const totalShares = convertToShares(input.quantity, input.unit, market);
+  const amount = calculateAmount(input.price, input.quantity, input.unit, market);
+  const commission = calculateCommission(amount, totalShares, input.unit, market);
+  const tax = calculateTax(amount, input.tradeType, input.securityType, input.isDayTrade, market);
   
   // 買入：總成本 = 成交金額 + 手續費
   // 賣出：淨收入 = 成交金額 - 手續費 - 交易稅

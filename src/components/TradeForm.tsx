@@ -46,6 +46,10 @@ interface TradeFormProps {
   onSubmit: (data: TradeFormData) => Promise<void>;
   onCancel?: () => void;
   submitLabel?: string;
+  /** 台股 TW / 美股 US，影響手續費與代號格式 */
+  market?: 'TW' | 'US';
+  /** 為 true 時不顯示表單內大標題（外層已有標題時使用） */
+  embedded?: boolean;
 }
 
 // ===== 表單元件 =====
@@ -55,7 +59,12 @@ export default function TradeForm({
   onSubmit,
   onCancel,
   submitLabel = '新增交易',
+  market = 'TW',
+  embedded = false,
 }: TradeFormProps) {
+  const isUS = market === 'US';
+  const priceSuffix = isUS ? '美元' : '元';
+
   // 表單狀態
   const getDefaultDate = (): string => {
     const today = new Date().toISOString().split('T')[0];
@@ -101,8 +110,22 @@ export default function TradeForm({
       setErrors({});
     }
   }, [initialData]);
-  
-  // 即時計算預覽與自動計算停損價（買入價 × 90%）
+
+  useEffect(() => {
+    if (!initialData) {
+      setFormData(prev => ({
+        ...prev,
+        unit: isUS ? 'SHARES' : prev.unit,
+        isDayTrade: isUS ? false : prev.isDayTrade,
+        securityType:
+          isUS && (prev.securityType === 'TDR' || prev.securityType === 'WARRANT')
+            ? 'STOCK'
+            : prev.securityType,
+      }));
+    }
+  }, [isUS, initialData]);
+
+  // 即時計算預覽與自動計算停損價（買入價 × 92%）
   useEffect(() => {
     const price = parseFloat(formData.price);
     const quantity = parseInt(formData.quantity);
@@ -114,13 +137,13 @@ export default function TradeForm({
         unit: formData.unit,
         tradeType: formData.tradeType,
         securityType: formData.securityType,
-        isDayTrade: formData.isDayTrade,
+        isDayTrade: isUS ? false : formData.isDayTrade,
+        market,
       });
       setPreview(calculation);
       
-      // 自動計算停損價 = 買入價 × 92%（容忍 8% 虧損）
       const autoStopLossPrice = Math.round(price * 0.92 * 100) / 100;
-      const totalShares = formData.unit === 'LOTS' ? quantity * 1000 : quantity;
+      const totalShares = isUS ? quantity : (formData.unit === 'LOTS' ? quantity * 1000 : quantity);
       const stopLossAmount = Math.round((price - autoStopLossPrice) * totalShares);
       
       setFormData(prev => ({
@@ -131,8 +154,8 @@ export default function TradeForm({
     } else {
       setPreview(null);
     }
-  }, [formData.price, formData.quantity, formData.unit, formData.tradeType, formData.securityType, formData.isDayTrade]);
-  
+  }, [formData.price, formData.quantity, formData.unit, formData.tradeType, formData.securityType, formData.isDayTrade, market, isUS]);
+
   // 表單驗證
   const validateForm = (): boolean => {
     const newErrors: TradeFormErrors = {};
@@ -140,6 +163,10 @@ export default function TradeForm({
     // 股票代號驗證
     if (!formData.stockCode.trim()) {
       newErrors.stockCode = '請輸入股票代號';
+    } else if (isUS) {
+      if (!/^[A-Z]{1,10}(\.[A-Z]{1,2})?$/i.test(formData.stockCode.trim())) {
+        newErrors.stockCode = '美股代號格式錯誤（例如 AAPL、BRK.B）';
+      }
     } else if (!/^\d{4,6}$/.test(formData.stockCode)) {
       newErrors.stockCode = '股票代號格式錯誤（應為 4-6 位數字）';
     }
@@ -154,7 +181,7 @@ export default function TradeForm({
     
     // 數量驗證（根據單位顯示不同訊息）
     const quantity = parseInt(formData.quantity);
-    const unitName = formData.unit === 'SHARES' ? '股數' : '張數';
+    const unitName = isUS ? '股數' : (formData.unit === 'SHARES' ? '股數' : '張數');
     
     if (!formData.quantity || isNaN(quantity)) {
       newErrors.quantity = `請輸入有效的${unitName}`;
@@ -183,13 +210,17 @@ export default function TradeForm({
   ) => {
     // 自動查詢股票資訊並一次更新
     if (field === 'stockCode' && typeof value === 'string' && value.trim()) {
-      const name = getStockNameByCode(value.trim());
-      if (name) {
-        setFormData(prev => ({ ...prev, stockCode: value, stockName: name }));
+      if (isUS) {
+        setFormData(prev => ({ ...prev, stockCode: value.trim().toUpperCase() }));
       } else {
-        setFormData(prev => ({ ...prev, stockCode: value }));
+        const name = getStockNameByCode(value.trim());
+        if (name) {
+          setFormData(prev => ({ ...prev, stockCode: value, stockName: name }));
+        } else {
+          setFormData(prev => ({ ...prev, stockCode: value }));
+        }
       }
-    } else if (field === 'stockName' && typeof value === 'string' && value.trim()) {
+    } else if (field === 'stockName' && typeof value === 'string' && value.trim() && !isUS) {
       const code = getStockCodeByName(value.trim());
       if (code) {
         setFormData(prev => ({ ...prev, stockName: value, stockCode: code }));
@@ -232,9 +263,11 @@ export default function TradeForm({
   
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl mx-auto p-6 bg-gray-900 rounded-lg shadow-md border border-gray-800">
-      <h2 className="text-2xl font-bold text-gray-100 mb-6">
-        {submitLabel}
-      </h2>
+      {!embedded && (
+        <h2 className="text-2xl font-bold text-gray-100 mb-6">
+          {submitLabel}
+        </h2>
+      )}
       
       {/* 錯誤訊息 */}
       {errors.general && (
@@ -282,7 +315,7 @@ export default function TradeForm({
             type="text"
             value={formData.stockCode}
             onChange={(e) => handleChange('stockCode', e.target.value)}
-            placeholder="例如：2330（會自動帶出名稱）"
+            placeholder={isUS ? '例如：AAPL' : '例如：2330（會自動帶出名稱）'}
             className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-gray-800 text-gray-100 ${
               errors.stockCode
                 ? 'border-red-600 focus:ring-red-500'
@@ -307,7 +340,7 @@ export default function TradeForm({
             type="text"
             value={formData.stockName}
             onChange={(e) => handleChange('stockName', e.target.value)}
-            placeholder="例如：台積電（會自動帶出代號）"
+            placeholder={isUS ? '例如：Apple Inc.' : '例如：台積電（會自動帶出代號）'}
             className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
           />
           {formData.stockCode && formData.stockName && (
@@ -350,7 +383,7 @@ export default function TradeForm({
                   : 'border-gray-600 focus:ring-blue-500'
               }`}
             />
-            <span className="absolute right-3 top-2 text-gray-400">元</span>
+            <span className="absolute right-3 top-2 text-gray-400">{priceSuffix}</span>
           </div>
           {errors.price && (
             <p className="mt-1 text-sm text-red-400">{errors.price}</p>
@@ -362,7 +395,7 @@ export default function TradeForm({
             數量 *
           </label>
           <div className="flex gap-2">
-            {/* 單位選擇器 */}
+            {!isUS && (
             <select
               value={formData.unit}
               onChange={(e) => handleChange('unit', e.target.value as TradeUnit)}
@@ -371,6 +404,7 @@ export default function TradeForm({
               <option value="SHARES">零股</option>
               <option value="LOTS">張</option>
             </select>
+            )}
             
             {/* 數量輸入 */}
             <div className="flex-1 relative">
@@ -380,7 +414,7 @@ export default function TradeForm({
                 min="1"
                 value={formData.quantity}
                 onChange={(e) => handleChange('quantity', e.target.value)}
-                placeholder={formData.unit === 'SHARES' ? '100' : '1'}
+                placeholder={isUS ? '10' : (formData.unit === 'SHARES' ? '100' : '1')}
                 className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-gray-800 text-gray-100 ${
                   errors.quantity
                     ? 'border-red-600 focus:ring-red-500'
@@ -388,21 +422,26 @@ export default function TradeForm({
                 }`}
               />
               <span className="absolute right-3 top-2 text-gray-400">
-                {formData.unit === 'SHARES' ? '股' : '張'}
+                {isUS ? '股' : (formData.unit === 'SHARES' ? '股' : '張')}
               </span>
             </div>
           </div>
           {errors.quantity && (
             <p className="mt-1 text-sm text-red-400">{errors.quantity}</p>
           )}
-          {formData.unit === 'SHARES' && (
+          {!isUS && formData.unit === 'SHARES' && (
             <p className="mt-1 text-xs text-blue-400">
               💡 零股單位為「股」，1 張 = 1000 股
             </p>
           )}
-          {formData.unit === 'LOTS' && (
+          {!isUS && formData.unit === 'LOTS' && (
             <p className="mt-1 text-xs text-blue-400">
               💡 整張單位為「張」，1 張 = 1000 股
+            </p>
+          )}
+          {isUS && (
+            <p className="mt-1 text-xs text-blue-400">
+              💡 美股以「股」為單位；手續費試算為 0，賣出含簡化規費
             </p>
           )}
         </div>
@@ -421,14 +460,17 @@ export default function TradeForm({
           >
             <option value="STOCK">股票</option>
             <option value="ETF">ETF / 指數型</option>
-            <option value="TDR">TDR</option>
-            <option value="WARRANT">權證</option>
+            {!isUS && <option value="TDR">TDR</option>}
+            {!isUS && <option value="WARRANT">權證</option>}
           </select>
           <p className="mt-1 text-xs text-blue-400">
-            💡 稅率：股票 0.3%（當沖 0.15%）、ETF/TDR/權證 0.1%（賣出時）
+            {isUS
+              ? '💡 美股試算：手續費 0；賣出為簡化規費（非台股交易稅）'
+              : '💡 稅率：股票 0.3%（當沖 0.15%）、ETF/TDR/權證 0.1%（賣出時）'}
           </p>
         </div>
         
+        {!isUS && (
         <div className="flex items-center gap-3 mt-6 md:mt-8">
           <input
             id="isDayTrade"
@@ -441,6 +483,7 @@ export default function TradeForm({
             現股當沖（稅率 0.15%，僅適用股票）
           </label>
         </div>
+        )}
       </div>
       
       
@@ -475,24 +518,24 @@ export default function TradeForm({
             <div className="text-gray-400">總股數：</div>
             <div className="font-semibold text-right text-blue-400">
               {preview.totalShares.toLocaleString('zh-TW')} 股
-              {formData.unit === 'LOTS' && ` (${formData.quantity} 張)`}
+              {!isUS && formData.unit === 'LOTS' && ` (${formData.quantity} 張)`}
             </div>
             
             <div className="text-gray-400">成交金額：</div>
             <div className="font-semibold text-right text-gray-200">
-              {preview.amount.toLocaleString('zh-TW')} 元
+              {preview.amount.toLocaleString('zh-TW')} {priceSuffix}
             </div>
             
-            <div className="text-gray-400">手續費（六折）：</div>
+            <div className="text-gray-400">{isUS ? '手續費（試算）：' : '手續費（六折）：'}</div>
             <div className="font-semibold text-right text-orange-400">
-              {preview.commission.toLocaleString('zh-TW')} 元
+              {preview.commission.toLocaleString('zh-TW')} {priceSuffix}
             </div>
             
             {formData.tradeType === 'SELL' && (
               <>
-                <div className="text-gray-400">交易稅：</div>
+                <div className="text-gray-400">{isUS ? '賣出規費（簡化）：' : '交易稅：'}</div>
                 <div className="font-semibold text-right text-orange-400">
-                  {preview.tax.toLocaleString('zh-TW')} 元
+                  {preview.tax.toLocaleString('zh-TW')} {priceSuffix}
                 </div>
               </>
             )}
@@ -505,7 +548,7 @@ export default function TradeForm({
             <div className={`font-bold text-right text-lg ${
               formData.tradeType === 'BUY' ? 'text-green-400' : 'text-red-400'
             }`}>
-              {preview.totalCost.toLocaleString('zh-TW')} 元
+              {preview.totalCost.toLocaleString('zh-TW')} {priceSuffix}
             </div>
             
             {formData.tradeType === 'BUY' && formData.stopLossPrice && preview && (
@@ -514,12 +557,12 @@ export default function TradeForm({
                 
                 <div className="text-gray-400">停損價（自動）：</div>
                 <div className="font-semibold text-right text-red-400">
-                  {parseFloat(formData.stopLossPrice).toLocaleString('zh-TW')} 元
+                  {parseFloat(formData.stopLossPrice).toLocaleString('zh-TW')} {priceSuffix}
                 </div>
                 
                 <div className="text-gray-400">預計停損損失：</div>
                 <div className="font-semibold text-right text-orange-400">
-                  {parseFloat(formData.plannedStopLoss || '0').toLocaleString('zh-TW')} 元（10%）
+                  {parseFloat(formData.plannedStopLoss || '0').toLocaleString('zh-TW')} {priceSuffix}（約當 8%）
                 </div>
               </>
             )}
@@ -554,8 +597,14 @@ export default function TradeForm({
       </div>
       
       <p className="text-xs text-gray-500 text-center">
+        {isUS ? (
+          <>* 美股金額以美元計；帳戶餘額僅反映台股，美股不併入同一餘額。</>
+        ) : (
+          <>
         * 為必填欄位。手續費與交易稅將自動計算（手續費六折，賣出時收取 0.3% 交易稅）<br />
         💡 換算：1 張 = 1000 股｜1 股 = 0.001 張
+          </>
+        )}
       </p>
     </form>
   );

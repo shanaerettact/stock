@@ -51,6 +51,7 @@ model Trade {
   totalCost         Float     // 總成本 = amount + commission + tax
   securityType      String    @default("STOCK") // STOCK / ETF / TDR / WARRANT
   isDayTrade        Boolean   @default(false)   // 是否為現股當沖
+  market            String    @default("TW")     // TW 台股 / US 美股
   
   // 關聯部位
   positionId        String?
@@ -63,6 +64,7 @@ model Trade {
   @@index([stockCode])
   @@index([tradeDate])
   @@index([positionId])
+  @@index([market])
   @@map("trades")
 }
 
@@ -74,6 +76,7 @@ model Position {
   
   stockCode         String       // 股票代號
   stockName         String?      // 股票名稱
+  market            String       @default("TW") // TW 台股 / US 美股
   
   // 部位狀態
   status            String       @default("OPEN") // OPEN / CLOSED
@@ -114,6 +117,7 @@ model Position {
   @@index([stockCode])
   @@index([status])
   @@index([entryDate])
+  @@index([market])
   @@map("positions")
 }
 

@@ -17,12 +17,14 @@ export async function GET(request: NextRequest) {
     const accountId = searchParams.get('accountId');
     const status = searchParams.get('status');
     const stockCode = searchParams.get('stockCode');
+    const market = searchParams.get('market');
 
     const positions = await prisma.position.findMany({
       where: {
         ...(accountId && { accountId }),
         ...(status && { status: status as 'OPEN' | 'CLOSED' }),
         ...(stockCode && { stockCode }),
+        ...(market && (market === 'US' || market === 'TW') ? { market } : {}),
       },
       include: {
         trades: true,

@@ -8,9 +8,10 @@ interface PositionsTableProps {
   positions: Position[];
   initialCapital?: number;
   onMessage?: (type: 'success' | 'error', text: string) => void;
+  currencySuffix?: string;
 }
 
-export default function PositionsTable({ positions, initialCapital = 100000, onMessage }: PositionsTableProps) {
+export default function PositionsTable({ positions, initialCapital = 100000, onMessage, currencySuffix = '元' }: PositionsTableProps) {
   const [stockPrices, setStockPrices] = useState<Record<string, StockPrice>>({});
   const [fetchingPrices, setFetchingPrices] = useState(false);
   const [pricesFetchedAt, setPricesFetchedAt] = useState<string | null>(null);
@@ -110,14 +111,14 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
             <div>
               <div className="text-sm text-gray-400 mb-1">總持倉成本</div>
               <div className="text-2xl font-bold text-white">
-                {Math.round(totalHoldingCost).toLocaleString()} <span className="text-lg text-gray-400">元</span>
+                {Math.round(totalHoldingCost).toLocaleString()} <span className="text-lg text-gray-400">{currencySuffix}</span>
               </div>
             </div>
             <div className="text-3xl text-gray-600">|</div>
             <div>
               <div className="text-sm text-gray-400 mb-1">投資預算</div>
               <div className="text-xl font-semibold text-gray-300">
-                {initialCapital.toLocaleString()} <span className="text-sm text-gray-400">元</span>
+                {initialCapital.toLocaleString()} <span className="text-sm text-gray-400">{currencySuffix}</span>
               </div>
             </div>
           </div>
@@ -191,6 +192,7 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
                 position={position} 
                 priceData={stockPrices[position.stockCode]}
                 initialCapital={initialCapital}
+                currencySuffix={currencySuffix}
               />
             ))}
           </tbody>
@@ -210,7 +212,7 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
 }
 
 // 單一持倉列元件
-function PositionRow({ position, priceData, initialCapital }: { position: Position; priceData?: StockPrice; initialCapital: number }) {
+function PositionRow({ position, priceData, initialCapital, currencySuffix = '元' }: { position: Position; priceData?: StockPrice; initialCapital: number; currencySuffix?: string }) {
   const closingPrice = priceData?.closingPrice;
   const change = priceData?.change;
   
@@ -240,7 +242,11 @@ function PositionRow({ position, priceData, initialCapital }: { position: Positi
         <div className="flex items-center gap-2">
           <span className="font-semibold text-gray-200">{position.stockCode}</span>
           <a
-            href={`https://tw.stock.yahoo.com/quote/${position.stockCode}/technical-analysis`}
+            href={
+              position.market === 'US'
+                ? `https://finance.yahoo.com/quote/${encodeURIComponent(position.stockCode)}`
+                : `https://tw.stock.yahoo.com/quote/${position.stockCode}/technical-analysis`
+            }
             target="_blank"
             rel="noopener noreferrer"
             className="text-blue-400 hover:text-blue-300 transition-colors"
@@ -290,12 +296,12 @@ function PositionRow({ position, priceData, initialCapital }: { position: Positi
 
       {/* 成本價 */}
       <td className="text-right py-3 px-4 text-gray-200">
-        {position.avgEntryPrice.toLocaleString()} 元
+        {position.avgEntryPrice.toLocaleString()} {currencySuffix}
       </td>
 
       {/* 今日收盤價 */}
       <td className="text-right py-3 px-4">
-        <ClosingPriceCell closingPrice={closingPrice} priceData={priceData} />
+        <ClosingPriceCell closingPrice={closingPrice} priceData={priceData} currencySuffix={currencySuffix} />
       </td>
 
       {/* 漲跌 */}
@@ -305,12 +311,12 @@ function PositionRow({ position, priceData, initialCapital }: { position: Positi
 
       {/* 未實現損益 */}
       <td className="text-right py-3 px-4">
-        <UnrealizedPnLCell amount={unrealizedPnL} percent={unrealizedPnLPercent} />
+        <UnrealizedPnLCell amount={unrealizedPnL} percent={unrealizedPnLPercent} currencySuffix={currencySuffix} />
       </td>
 
       {/* 停損價 */}
       <td className="text-right py-3 px-4">
-        <StopLossCell trailingStop={trailingStop} originalStopLoss={originalStopLoss} />
+        <StopLossCell trailingStop={trailingStop} originalStopLoss={originalStopLoss} currencySuffix={currencySuffix} />
       </td>
 
       {/* 狀態與佔比 */}
@@ -333,12 +339,12 @@ function PositionRow({ position, priceData, initialCapital }: { position: Positi
 }
 
 // 收盤價欄位
-function ClosingPriceCell({ closingPrice, priceData }: { closingPrice?: number | null; priceData?: StockPrice }) {
+function ClosingPriceCell({ closingPrice, priceData, currencySuffix = '元' }: { closingPrice?: number | null; priceData?: StockPrice; currencySuffix?: string }) {
   if (closingPrice !== null && closingPrice !== undefined) {
     return (
       <div>
         <span className="font-semibold text-gray-200">
-          {closingPrice.toLocaleString()} 元
+          {closingPrice.toLocaleString()} {currencySuffix}
         </span>
         {priceData?.market && (
           <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
@@ -373,12 +379,12 @@ function ChangeCell({ change }: { change?: number | null }) {
 }
 
 // 未實現損益欄位
-function UnrealizedPnLCell({ amount, percent }: { amount: number | null; percent: number | null }) {
+function UnrealizedPnLCell({ amount, percent, currencySuffix = '元' }: { amount: number | null; percent: number | null; currencySuffix?: string }) {
   if (amount !== null && percent !== null) {
     return (
       <div>
         <div className={`font-semibold ${amount >= 0 ? 'text-red-400' : 'text-green-400'}`}>
-          {amount >= 0 ? '+' : ''}{Math.round(amount).toLocaleString()} 元
+          {amount >= 0 ? '+' : ''}{Math.round(amount).toLocaleString()} {currencySuffix}
         </div>
         <div className={`text-xs ${percent >= 0 ? 'text-red-500' : 'text-green-500'}`}>
           ({percent >= 0 ? '+' : ''}{percent.toFixed(2)}%)
@@ -390,7 +396,7 @@ function UnrealizedPnLCell({ amount, percent }: { amount: number | null; percent
 }
 
 // 停損價欄位
-function StopLossCell({ trailingStop, originalStopLoss }: { trailingStop: TrailingStopResult | null; originalStopLoss: number }) {
+function StopLossCell({ trailingStop, originalStopLoss, currencySuffix = '元' }: { trailingStop: TrailingStopResult | null; originalStopLoss: number; currencySuffix?: string }) {
   if (trailingStop) {
     return (
       <div>
@@ -401,7 +407,7 @@ function StopLossCell({ trailingStop, originalStopLoss }: { trailingStop: Traili
               ? 'text-green-400' 
               : 'text-red-400'
         }`}>
-          {trailingStop.stopLossPrice.toLocaleString()} 元
+          {trailingStop.stopLossPrice.toLocaleString()} {currencySuffix}
         </div>
         {trailingStop.isTriggered ? (
           <div className="text-xs text-red-400 font-semibold mt-1">⚠️ 已觸發停損</div>
@@ -417,7 +423,7 @@ function StopLossCell({ trailingStop, originalStopLoss }: { trailingStop: Traili
   
   return (
     <span className="text-red-400 font-medium">
-      {originalStopLoss.toLocaleString()} 元
+      {originalStopLoss.toLocaleString()} {currencySuffix}
     </span>
   );
 }

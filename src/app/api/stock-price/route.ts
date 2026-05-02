@@ -48,7 +48,7 @@ export interface StockPriceResult {
   error?: string;
   // 52 周新高相關
   is52WeekHigh?: boolean;        // 是否創 52 周新高
-  week52High?: number;            // 52 周最高價
+  week52High?: number | null;            // 52 周最高價
   // 交易量相關
   todayVolume?: number | null;    // 今日交易量
   avg50DayVolume?: number | null; // 50 日平均交易量
@@ -82,9 +82,20 @@ interface HistoryCandle {
 
 // 民國年轉西元 (e.g. "113/02/01" -> "2024-02-01")
 function rocDateToIso(rocStr: string): string {
-  const [y, m, d] = rocStr.split('/').map(Number);
+  const parts = rocStr.split('/').map((s) => Number(s));
+  const y = parts[0];
+  const m = parts[1];
+  const d = parts[2];
+  if (y === undefined || m === undefined || d === undefined || !Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return '1970-01-01';
+  }
   const adYear = y + 1911;
   return `${adYear}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function parseYearMonth(isoDate: string): { y: number; m: number } {
+  const parts = isoDate.split('-').map(Number);
+  return { y: parts[0] ?? 1970, m: parts[1] ?? 1 };
 }
 
 // 證交所 TWSE 個股日成交（上市股票）https://www.twse.com.tw/exchangeReport/STOCK_DAY
@@ -93,8 +104,8 @@ async function fetchTWSEHistory(
   startDate: string,
   endDate: string
 ): Promise<HistoryCandle[]> {
-  const [startY, startM] = startDate.split('-').map(Number);
-  const [endY, endM] = endDate.split('-').map(Number);
+  const { y: startY, m: startM } = parseYearMonth(startDate);
+  const { y: endY, m: endM } = parseYearMonth(endDate);
   const result: HistoryCandle[] = [];
 
   for (let y = startY; y <= endY; y++) {
@@ -135,8 +146,8 @@ async function fetchTPEXHistory(
   startDate: string,
   endDate: string
 ): Promise<HistoryCandle[]> {
-  const [startY, startM] = startDate.split('-').map(Number);
-  const [endY, endM] = endDate.split('-').map(Number);
+  const { y: startY, m: startM } = parseYearMonth(startDate);
+  const { y: endY, m: endM } = parseYearMonth(endDate);
   const result: HistoryCandle[] = [];
 
   for (let y = startY; y <= endY; y++) {

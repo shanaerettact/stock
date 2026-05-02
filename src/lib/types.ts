@@ -15,6 +15,7 @@ export interface Trade {
   unit: string;
   securityType: string;
   isDayTrade: boolean;
+  market?: string;
   amount: number;
   commission: number;
   tax: number;
@@ -28,6 +29,7 @@ export interface Position {
   id: string;
   stockCode: string;
   stockName: string | null;
+  market?: string;
   status: string;
   entryDate: string;
   avgEntryPrice: number;

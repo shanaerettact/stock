@@ -21,7 +21,8 @@ interface TradeRecord {
 /**
  * 將交易數量轉換為股數
  */
-function convertToShares(quantity: number, unit: string): number {
+function convertToShares(quantity: number, unit: string, market: string): number {
+  if (market === 'US') return quantity;
   return unit === 'LOTS' ? quantity * 1000 : quantity;
 }
 
@@ -73,15 +74,19 @@ export async function PUT(
       tradeDate,
       price,
       quantity,
-      unit,
+      unit: rawUnit,
       securityType = 'STOCK',
-      isDayTrade = false,
+      isDayTrade: rawDayTrade = false,
     } = body;
 
     // 驗證必填欄位
-    if (!stockCode || !tradeType || !tradeDate || !price || !quantity || !unit) {
+    if (!stockCode || !tradeType || !tradeDate || !price || !quantity || !rawUnit) {
       return NextResponse.json({ error: '缺少必填欄位' }, { status: 400 });
     }
+
+    const market = body.market === 'US' ? 'US' : 'TW';
+    const unit = market === 'US' ? 'SHARES' : rawUnit;
+    const isDayTrade = market === 'US' ? false : rawDayTrade;
 
     // 解析數量，確保是整數
     const parsedQuantity = typeof quantity === 'number' ? Math.floor(quantity) : parseInt(String(quantity), 10);
@@ -107,6 +112,7 @@ export async function PUT(
       tradeType,
       securityType,
       isDayTrade,
+      market,
     });
 
     // 🔧 調整帳戶餘額差異
@@ -115,20 +121,22 @@ export async function PUT(
     });
 
     if (account) {
-      // 先回滾舊交易的影響
       let balanceAdjustment = 0;
       
-      if (existingTrade.tradeType === 'BUY') {
-        balanceAdjustment += existingTrade.totalCost; // 回滾舊買入（加回）
-      } else {
-        balanceAdjustment -= existingTrade.totalCost; // 回滾舊賣出（扣除）
+      if ((existingTrade.market ?? 'TW') === 'TW') {
+        if (existingTrade.tradeType === 'BUY') {
+          balanceAdjustment += existingTrade.totalCost;
+        } else {
+          balanceAdjustment -= existingTrade.totalCost;
+        }
       }
       
-      // 再套用新交易的影響
-      if (tradeType === 'BUY') {
-        balanceAdjustment -= calculation.totalCost; // 新買入（扣除）
-      } else {
-        balanceAdjustment += calculation.totalCost; // 新賣出（加回）
+      if (market === 'TW') {
+        if (tradeType === 'BUY') {
+          balanceAdjustment -= calculation.totalCost;
+        } else {
+          balanceAdjustment += calculation.totalCost;
+        }
       }
 
       await prisma.account.update({
@@ -140,7 +148,6 @@ export async function PUT(
     // 處理部位關聯變更
     const oldPositionId = existingTrade.positionId;
     const stockCodeChanged = existingTrade.stockCode !== stockCode;
-    const tradeTypeChanged = existingTrade.tradeType !== tradeType;
     
     // 如果股票代碼改變，需要解除舊部位的關聯
     let newPositionId: string | null = null;
@@ -173,6 +180,7 @@ export async function PUT(
           where: {
             accountId: existingTrade.accountId,
             stockCode,
+            market,
             status: 'OPEN',
           },
           orderBy: { entryDate: 'desc' },
@@ -187,6 +195,7 @@ export async function PUT(
               accountId: existingTrade.accountId,
               stockCode,
               stockName: stockName || null,
+              market,
               status: 'OPEN',
               entryDate: new Date(tradeDate),
               avgEntryPrice: parseFloat(price),
@@ -206,6 +215,7 @@ export async function PUT(
           where: {
             accountId: existingTrade.accountId,
             stockCode,
+            market,
             status: 'OPEN',
           },
           orderBy: { entryDate: 'desc' },
@@ -223,6 +233,7 @@ export async function PUT(
               accountId: existingTrade.accountId,
               stockCode,
               stockName: stockName || null,
+              market,
               status: 'OPEN',
               entryDate: new Date(tradeDate),
               avgEntryPrice: parseFloat(price),
@@ -243,6 +254,7 @@ export async function PUT(
             where: {
               accountId: existingTrade.accountId,
               stockCode,
+              market,
               status: 'OPEN',
             },
             orderBy: { entryDate: 'desc' },
@@ -256,7 +268,7 @@ export async function PUT(
     }
 
     // 更新交易記錄
-    const updatedTrade = await prisma.trade.update({
+    await prisma.trade.update({
       where: { id },
       data: {
         stockCode,
@@ -272,6 +284,7 @@ export async function PUT(
         totalCost: calculation.totalCost,
         securityType,
         isDayTrade,
+        market,
         positionId: newPositionId,
       },
       include: {
@@ -340,7 +353,7 @@ export async function DELETE(
       where: { id: existingTrade.accountId },
     });
 
-    if (account) {
+    if (account && (existingTrade.market ?? 'TW') === 'TW') {
       const balanceAdjustment =
         existingTrade.tradeType === 'BUY'
           ? existingTrade.totalCost  // 刪除買入，加回餘額
@@ -394,14 +407,15 @@ async function updatePositionFromTrades(positionId: string) {
 
   // 計算買入交易（將數量轉換為股數）
   const buyTrades = trades.filter((t: TradeRecord) => t.tradeType === 'BUY');
-  const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit), 0);
+  const m = (trades[0] as { market?: string }).market ?? 'TW';
+  const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit, m), 0);
   const totalBuyAmount = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
   const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
 
   // 計算賣出交易（將數量轉換為股數）
   const sellTrades = trades.filter((t: TradeRecord) => t.tradeType === 'SELL');
-  const totalSellQuantity = sellTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit), 0);
+  const totalSellQuantity = sellTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit, m), 0);
   const totalSellAmount = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalSellCommission = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
   const totalSellTax = sellTrades.reduce((sum: number, t: TradeRecord) => sum + t.tax, 0);

@@ -38,7 +38,7 @@ export default function HomePage() {
       const [tradesRes, positionsRes, accountRes] = await Promise.all([
         fetch(`/api/trades?accountId=${ACCOUNT_ID}&market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' }),
         fetch(`/api/positions?accountId=${ACCOUNT_ID}&market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' }),
-        fetch(`/api/account?_t=${timestamp}`, { cache: 'no-store' })
+        fetch(`/api/account?market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' })
       ]);
       
       if (tradesRes.ok) setTrades(await tradesRes.json());
@@ -149,7 +149,7 @@ export default function HomePage() {
       const response = await fetch('/api/account', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initialCapital: newCapital }),
+        body: JSON.stringify({ initialCapital: newCapital, market: activeMarket }),
       });
       if (!response.ok) {
         const errorData = await response.json();
@@ -312,6 +312,7 @@ export default function HomePage() {
                 positions={positions}
                 accountBalance={accountBalance}
                 initialCapital={initialCapital}
+                activeMarket={activeMarket}
                 onUpdateCapital={handleUpdateCapital}
                 onRefreshData={loadData}
               />

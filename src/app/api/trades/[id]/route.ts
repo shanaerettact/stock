@@ -121,28 +121,31 @@ export async function PUT(
     });
 
     if (account) {
-      let balanceAdjustment = 0;
-      
-      if ((existingTrade.market ?? 'TW') === 'TW') {
-        if (existingTrade.tradeType === 'BUY') {
-          balanceAdjustment += existingTrade.totalCost;
-        } else {
-          balanceAdjustment -= existingTrade.totalCost;
-        }
-      }
-      
-      if (market === 'TW') {
-        if (tradeType === 'BUY') {
-          balanceAdjustment -= calculation.totalCost;
-        } else {
-          balanceAdjustment += calculation.totalCost;
-        }
+      let twAdj = 0;
+      let usAdj = 0;
+
+      const oldMarket = existingTrade.market ?? 'TW';
+      if (oldMarket === 'US') {
+        usAdj += existingTrade.tradeType === 'BUY' ? existingTrade.totalCost : -existingTrade.totalCost;
+      } else {
+        twAdj += existingTrade.tradeType === 'BUY' ? existingTrade.totalCost : -existingTrade.totalCost;
       }
 
-      await prisma.account.update({
-        where: { id: existingTrade.accountId },
-        data: { currentBalance: account.currentBalance + balanceAdjustment },
-      });
+      if (market === 'US') {
+        usAdj += tradeType === 'BUY' ? -calculation.totalCost : calculation.totalCost;
+      } else {
+        twAdj += tradeType === 'BUY' ? -calculation.totalCost : calculation.totalCost;
+      }
+
+      const data: Record<string, number> = {};
+      if (twAdj !== 0) data.currentBalance = account.currentBalance + twAdj;
+      if (usAdj !== 0) data.currentBalanceUS = account.currentBalanceUS + usAdj;
+      if (Object.keys(data).length > 0) {
+        await prisma.account.update({
+          where: { id: existingTrade.accountId },
+          data,
+        });
+      }
     }
 
     // 處理部位關聯變更
@@ -353,16 +356,24 @@ export async function DELETE(
       where: { id: existingTrade.accountId },
     });
 
-    if (account && (existingTrade.market ?? 'TW') === 'TW') {
+    if (account) {
+      const tradeMarket = existingTrade.market ?? 'TW';
       const balanceAdjustment =
         existingTrade.tradeType === 'BUY'
-          ? existingTrade.totalCost  // 刪除買入，加回餘額
-          : -existingTrade.totalCost; // 刪除賣出，扣除餘額
+          ? existingTrade.totalCost
+          : -existingTrade.totalCost;
 
-      await prisma.account.update({
-        where: { id: existingTrade.accountId },
-        data: { currentBalance: account.currentBalance + balanceAdjustment },
-      });
+      if (tradeMarket === 'US') {
+        await prisma.account.update({
+          where: { id: existingTrade.accountId },
+          data: { currentBalanceUS: account.currentBalanceUS + balanceAdjustment },
+        });
+      } else {
+        await prisma.account.update({
+          where: { id: existingTrade.accountId },
+          data: { currentBalance: account.currentBalance + balanceAdjustment },
+        });
+      }
     }
 
     // 刪除交易記錄

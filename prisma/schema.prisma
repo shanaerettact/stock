@@ -14,8 +14,10 @@ generator client {
 model Account {
   id                String    @id @default(cuid())
   userId            String    @unique // 預留多使用者功能
-  initialCapital    Float     // 初始資金
-  currentBalance    Float     // 當前餘額
+  initialCapital    Float     // 初始資金（台股）
+  currentBalance    Float     // 當前餘額（台股）
+  initialCapitalUS  Float     @default(0) // 初始資金（美股）
+  currentBalanceUS  Float     @default(0) // 當前餘額（美股）
   currency          String    @default("TWD") // 幣別
   
   createdAt         DateTime  @default(now())

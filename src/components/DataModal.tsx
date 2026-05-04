@@ -15,6 +15,7 @@ interface DataModalProps {
   positions: Position[];
   accountBalance: number;
   initialCapital: number;
+  activeMarket?: 'TW' | 'US';
   onUpdateCapital?: (newCapital: number) => Promise<void>;
   onRefreshData?: () => void | Promise<void>;
 }
@@ -27,9 +28,11 @@ export default function DataModal({
   positions,
   accountBalance,
   initialCapital,
+  activeMarket = 'TW',
   onUpdateCapital,
   onRefreshData,
 }: DataModalProps) {
+  const currencyUnit = activeMarket === 'US' ? '美元' : '元';
   const [isEditingCapital, setIsEditingCapital] = useState(false);
   const [editingNoteValue, setEditingNoteValue] = useState('');
   const [positionNotes, setPositionNotes] = useState<Record<string, string>>({});
@@ -408,7 +411,7 @@ export default function DataModal({
               <div className="bg-purple-900/30 rounded-lg p-4 border border-purple-800">
                 <div className="text-sm text-gray-400">總手續費</div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {trades.reduce((sum, t) => sum + t.commission, 0).toLocaleString()} 元
+                  {trades.reduce((sum, t) => sum + t.commission, 0).toLocaleString()} {currencyUnit}
                 </div>
               </div>
             </div>
@@ -431,8 +434,8 @@ export default function DataModal({
                     </div>
                     <div className="text-gray-400 mt-1">
                       {new Date(trade.tradeDate).toLocaleDateString()} • 
-                      {trade.price} 元 × {trade.quantity} {trade.unit === 'SHARES' ? '股' : '張'} = 
-                      {trade.amount.toLocaleString()} 元
+                      {trade.price} {currencyUnit} × {trade.quantity} {trade.unit === 'SHARES' ? '股' : '張'} = 
+                      {trade.amount.toLocaleString()} {currencyUnit}
                     </div>
                   </div>
                 ))}
@@ -495,14 +498,14 @@ export default function DataModal({
               <div className="bg-gradient-to-br from-purple-900/30 to-purple-900/50 rounded-lg p-4 border border-purple-800">
                 <div className="text-sm text-gray-400">平均獲利</div>
                 <div className="text-2xl font-bold text-purple-400">
-                  +{performance.avgWin.toLocaleString()} 元
+                  +{performance.avgWin.toLocaleString()} {currencyUnit}
                 </div>
               </div>
               
               <div className="bg-gradient-to-br from-orange-900/30 to-orange-900/50 rounded-lg p-4 border border-orange-800">
                 <div className="text-sm text-gray-400">平均虧損</div>
                 <div className="text-2xl font-bold text-orange-400">
-                  -{performance.avgLoss.toLocaleString()} 元
+                  -{performance.avgLoss.toLocaleString()} {currencyUnit}
                 </div>
               </div>
               
@@ -650,7 +653,7 @@ export default function DataModal({
                   </div>
                 ) : (
                   <div className="text-3xl font-bold text-blue-400">
-                    {initialCapital.toLocaleString()} 元
+                    {initialCapital.toLocaleString()} {currencyUnit}
                   </div>
                 )}
               </div>
@@ -661,7 +664,7 @@ export default function DataModal({
                 <div className={`text-3xl font-bold ${
                   accountBalance >= initialCapital ? 'text-green-400' : 'text-red-400'
                 }`}>
-                  {accountBalance.toLocaleString()} 元
+                  {accountBalance.toLocaleString()} {currencyUnit}
                 </div>
               </div>
               <div className={`rounded-lg p-4 col-span-2 border ${
@@ -675,7 +678,7 @@ export default function DataModal({
                 </div>
                 <div className="text-sm text-gray-500 mt-2">
                   {Number(returnRate) >= 0 ? '獲利' : '虧損'}：
-                  {(accountBalance - initialCapital).toLocaleString()} 元
+                  {(accountBalance - initialCapital).toLocaleString()} {currencyUnit}
                 </div>
               </div>
             </div>
@@ -685,7 +688,7 @@ export default function DataModal({
               <div className="bg-orange-900/30 rounded-lg p-4 border border-orange-800">
                 <div className="text-sm text-gray-400">持倉成本</div>
                 <div className="text-2xl font-bold text-orange-400">
-                  {Math.round(holdingCost).toLocaleString()} 元
+                  {Math.round(holdingCost).toLocaleString()} {currencyUnit}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
                   {openPositions.length} 個持倉部位
@@ -705,7 +708,7 @@ export default function DataModal({
               }`}>
                 <div className="text-sm text-gray-400">已實現損益</div>
                 <div className={`text-2xl font-bold ${realizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {realizedPnL >= 0 ? '+' : ''}{Math.round(realizedPnL).toLocaleString()} 元
+                  {realizedPnL >= 0 ? '+' : ''}{Math.round(realizedPnL).toLocaleString()} {currencyUnit}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
                   {closedPositions.length} 筆已平倉
@@ -748,7 +751,7 @@ export default function DataModal({
                             </div>
                           </div>
                           <div className="text-xs text-gray-500 mt-0.5">
-                            {pos.totalQuantity.toLocaleString()} 股 × {pos.avgEntryPrice.toLocaleString()} 元 = {Math.round(posCost).toLocaleString()} 元
+                            {pos.totalQuantity.toLocaleString()} 股 × {pos.avgEntryPrice.toLocaleString()} {currencyUnit} = {Math.round(posCost).toLocaleString()} {currencyUnit}
                           </div>
                         </div>
                       </div>
@@ -803,7 +806,7 @@ export default function DataModal({
                       </div>
                       <div className="flex justify-between font-semibold border-t border-gray-700 pt-1">
                         <span className="text-gray-300">= 總資產</span>
-                        <span className="text-white">{Math.round(totalAssets).toLocaleString()} 元</span>
+                        <span className="text-white">{Math.round(totalAssets).toLocaleString()} {currencyUnit}</span>
                       </div>
                     </div>
                     
@@ -822,7 +825,7 @@ export default function DataModal({
                       </div>
                       <div className="flex justify-between font-semibold border-t border-gray-700 pt-1">
                         <span className="text-gray-300">= 預期總資產</span>
-                        <span className="text-white">{Math.round(expectedAssets).toLocaleString()} 元</span>
+                        <span className="text-white">{Math.round(expectedAssets).toLocaleString()} {currencyUnit}</span>
                       </div>
                     </div>
                   </div>
@@ -833,7 +836,7 @@ export default function DataModal({
                     </div>
                   ) : (
                     <div className="mt-3 p-2 bg-red-900/30 rounded text-xs text-red-300">
-                      ❌ 資產不平衡，差異 {assetsDiff >= 0 ? '+' : ''}{assetsDiff.toLocaleString()} 元
+                      ❌ 資產不平衡，差異 {assetsDiff >= 0 ? '+' : ''}{assetsDiff.toLocaleString()} {currencyUnit}
                       <br />
                       可能原因：交易記錄遺漏、重複記錄、或持倉計算錯誤
                     </div>
@@ -854,29 +857,29 @@ export default function DataModal({
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-400">買入總支出</span>
-                  <span className="text-red-400">-{Math.round(totalBuyCost).toLocaleString()} 元</span>
+                  <span className="text-red-400">-{Math.round(totalBuyCost).toLocaleString()} {currencyUnit}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">賣出總收入</span>
-                  <span className="text-green-400">+{Math.round(totalSellIncome).toLocaleString()} 元</span>
+                  <span className="text-green-400">+{Math.round(totalSellIncome).toLocaleString()} {currencyUnit}</span>
                 </div>
                 <div className="border-t border-gray-700 pt-2 flex justify-between">
                   <span className="text-gray-400">預期餘額</span>
                   <span className="text-gray-200 font-semibold">
-                    {Math.round(expectedBalance).toLocaleString()} 元
+                    {Math.round(expectedBalance).toLocaleString()} {currencyUnit}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">系統餘額</span>
                   <span className="text-gray-200 font-semibold">
-                    {accountBalance.toLocaleString()} 元
+                    {accountBalance.toLocaleString()} {currencyUnit}
                   </span>
                 </div>
                 {!isBalanceMatch && (
                   <div className="flex justify-between text-yellow-400">
                     <span>差異</span>
                     <span className="font-semibold">
-                      {balanceDiff >= 0 ? '+' : ''}{balanceDiff.toLocaleString()} 元
+                      {balanceDiff >= 0 ? '+' : ''}{balanceDiff.toLocaleString()} {currencyUnit}
                     </span>
                   </div>
                 )}
@@ -934,7 +937,7 @@ export default function DataModal({
                 <div className="border-t border-gray-600 pt-2 flex justify-between items-center">
                   <span className="text-gray-300 font-semibold">= 預期餘額</span>
                   <span className="text-white font-mono font-bold">
-                    {Math.round(expectedBalance).toLocaleString()} 元
+                    {Math.round(expectedBalance).toLocaleString()} {currencyUnit}
                   </span>
                 </div>
               </div>
@@ -1131,7 +1134,7 @@ export default function DataModal({
                           </span>
                         </div>
                         <div className="text-xs text-gray-400 mt-1">
-                          損益：{(position.totalPnL || 0) >= 0 ? '+' : ''}{(position.totalPnL || 0).toLocaleString()} 元
+                          損益：{(position.totalPnL || 0) >= 0 ? '+' : ''}{(position.totalPnL || 0).toLocaleString()} {currencyUnit}
                         </div>
                       </div>
                     ))}

@@ -5,10 +5,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-// GET /api/account - 查詢帳戶（目前返回第一個帳戶）
-export async function GET() {
+// GET /api/account - 查詢帳戶（支援 market 參數回傳對應資金）
+export async function GET(request: NextRequest) {
   try {
-    // 查詢第一個帳戶（在多使用者系統中應該根據登入的使用者查詢）
+    const { searchParams } = new URL(request.url);
+    const market = searchParams.get('market') || 'TW';
+
     const account = await prisma.account.findFirst({
       orderBy: {
         createdAt: 'desc',
@@ -22,7 +24,14 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json(account);
+    const initialCapital = market === 'US' ? account.initialCapitalUS : account.initialCapital;
+    const currentBalance = market === 'US' ? account.currentBalanceUS : account.currentBalance;
+
+    return NextResponse.json({
+      ...account,
+      initialCapital,
+      currentBalance,
+    });
   } catch (error) {
     console.error('查詢帳戶失敗:', error);
     return NextResponse.json(
@@ -32,13 +41,12 @@ export async function GET() {
   }
 }
 
-// PUT /api/account - 更新帳戶資訊（初始資金）
+// PUT /api/account - 更新帳戶資訊（初始資金，依 market 分開）
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { initialCapital } = body;
+    const { initialCapital, market = 'TW' } = body;
 
-    // 驗證初始資金
     if (initialCapital === undefined || initialCapital === null) {
       return NextResponse.json(
         { error: '請提供初始資金' },
@@ -54,7 +62,6 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // 查詢第一個帳戶
     const existingAccount = await prisma.account.findFirst({
       orderBy: {
         createdAt: 'desc',
@@ -68,18 +75,23 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // 計算當前餘額的差額並更新
-    const capitalDiff = parsedCapital - existingAccount.initialCapital;
-    
+    const isUS = market === 'US';
+    const oldCapital = isUS ? existingAccount.initialCapitalUS : existingAccount.initialCapital;
+    const oldBalance = isUS ? existingAccount.currentBalanceUS : existingAccount.currentBalance;
+    const capitalDiff = parsedCapital - oldCapital;
+
     const updatedAccount = await prisma.account.update({
       where: { id: existingAccount.id },
-      data: {
-        initialCapital: parsedCapital,
-        currentBalance: existingAccount.currentBalance + capitalDiff,
-      },
+      data: isUS
+        ? { initialCapitalUS: parsedCapital, currentBalanceUS: oldBalance + capitalDiff }
+        : { initialCapital: parsedCapital, currentBalance: oldBalance + capitalDiff },
     });
 
-    return NextResponse.json(updatedAccount);
+    return NextResponse.json({
+      ...updatedAccount,
+      initialCapital: isUS ? updatedAccount.initialCapitalUS : updatedAccount.initialCapital,
+      currentBalance: isUS ? updatedAccount.currentBalanceUS : updatedAccount.currentBalance,
+    });
   } catch (error) {
     console.error('更新帳戶失敗:', error);
     return NextResponse.json(

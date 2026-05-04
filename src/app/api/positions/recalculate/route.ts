@@ -229,40 +229,39 @@ async function recalculateAccountBalance(accountId: string) {
     return { success: false, error: '找不到帳戶' };
   }
 
-  // 查詢該帳戶的所有交易記錄
-  // 僅以台股交易重算帳戶餘額（美股幣別不同，不計入同一餘額）
   const allTrades = await prisma.trade.findMany({
-    where: { accountId, market: 'TW' },
+    where: { accountId },
     orderBy: { tradeDate: 'asc' },
   });
 
-  // 計算正確的餘額
-  // 餘額 = 初始資金 - 買入總支出 + 賣出總收入
-  let calculatedBalance = account.initialCapital;
+  let calcTW = account.initialCapital;
+  let calcUS = account.initialCapitalUS;
 
   for (const trade of allTrades) {
-    if (trade.tradeType === 'BUY') {
-      calculatedBalance -= trade.totalCost; // 買入扣除（含手續費）
+    const m = trade.market ?? 'TW';
+    if (m === 'US') {
+      calcUS += trade.tradeType === 'BUY' ? -trade.totalCost : trade.totalCost;
     } else {
-      calculatedBalance += trade.totalCost; // 賣出增加（實收金額）
+      calcTW += trade.tradeType === 'BUY' ? -trade.totalCost : trade.totalCost;
     }
   }
 
-  const oldBalance = account.currentBalance;
-  const difference = calculatedBalance - oldBalance;
+  const oldTW = account.currentBalance;
+  const oldUS = account.currentBalanceUS;
+  const diffTW = calcTW - oldTW;
+  const diffUS = calcUS - oldUS;
 
-  // 更新帳戶餘額
   await prisma.account.update({
     where: { id: accountId },
-    data: { currentBalance: calculatedBalance },
+    data: { currentBalance: calcTW, currentBalanceUS: calcUS },
   });
 
   return {
     success: true,
     initialCapital: account.initialCapital,
-    oldBalance: Math.round(oldBalance * 100) / 100,
-    newBalance: Math.round(calculatedBalance * 100) / 100,
-    difference: Math.round(difference * 100) / 100,
+    oldBalance: Math.round(oldTW * 100) / 100,
+    newBalance: Math.round(calcTW * 100) / 100,
+    difference: Math.round((diffTW + diffUS) * 100) / 100,
     tradesCount: allTrades.length,
   };
 }

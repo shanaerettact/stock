@@ -173,16 +173,26 @@ export async function POST(request: NextRequest) {
       where: { id: accountId },
     });
 
-    if (account && market === 'TW') {
-      const newBalance =
-        tradeType === 'BUY'
-          ? account.currentBalance - calculation.totalCost
-          : account.currentBalance + calculation.totalCost;
-
-      await prisma.account.updateMany({
-        where: { id: accountId },
-        data: { currentBalance: newBalance },
-      });
+    if (account) {
+      if (market === 'US') {
+        const newBalance =
+          tradeType === 'BUY'
+            ? account.currentBalanceUS - calculation.totalCost
+            : account.currentBalanceUS + calculation.totalCost;
+        await prisma.account.updateMany({
+          where: { id: accountId },
+          data: { currentBalanceUS: newBalance },
+        });
+      } else {
+        const newBalance =
+          tradeType === 'BUY'
+            ? account.currentBalance - calculation.totalCost
+            : account.currentBalance + calculation.totalCost;
+        await prisma.account.updateMany({
+          where: { id: accountId },
+          data: { currentBalance: newBalance },
+        });
+      }
     }
 
     // 重新查詢交易記錄（含更新後的部位資訊）

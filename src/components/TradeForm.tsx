@@ -128,8 +128,8 @@ export default function TradeForm({
   // 即時計算預覽與自動計算停損價（買入價 × 92%）
   useEffect(() => {
     const price = parseFloat(formData.price);
-    const quantity = parseInt(formData.quantity);
-    
+    const quantity = isUS ? parseFloat(formData.quantity) : parseInt(formData.quantity, 10);
+
     if (!isNaN(price) && !isNaN(quantity) && price > 0 && quantity > 0) {
       const calculation = calculateTrade({
         price,
@@ -180,14 +180,14 @@ export default function TradeForm({
     }
     
     // 數量驗證（根據單位顯示不同訊息）
-    const quantity = parseInt(formData.quantity);
+    const quantity = isUS ? parseFloat(formData.quantity) : parseInt(formData.quantity, 10);
     const unitName = isUS ? '股數' : (formData.unit === 'SHARES' ? '股數' : '張數');
-    
+
     if (!formData.quantity || isNaN(quantity)) {
       newErrors.quantity = `請輸入有效的${unitName}`;
     } else if (quantity <= 0) {
       newErrors.quantity = `${unitName}必須大於 0`;
-    } else if (!Number.isInteger(quantity)) {
+    } else if (!isUS && !Number.isInteger(quantity)) {
       newErrors.quantity = `${unitName}必須為整數`;
     }
     
@@ -211,7 +211,9 @@ export default function TradeForm({
     // 自動查詢股票資訊並一次更新
     if (field === 'stockCode' && typeof value === 'string' && value.trim()) {
       if (isUS) {
-        setFormData(prev => ({ ...prev, stockCode: value.trim().toUpperCase() }));
+        const u = value.trim().toUpperCase();
+        const name = getStockNameByCode(u);
+        setFormData(prev => ({ ...prev, stockCode: u, ...(name ? { stockName: name } : {}) }));
       } else {
         const name = getStockNameByCode(value.trim());
         if (name) {

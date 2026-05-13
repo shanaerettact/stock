@@ -21,9 +21,11 @@ interface TradeRecord {
 /**
  * 將交易數量轉換為股數
  */
-function convertToShares(quantity: number, unit: string, market: string): number {
-  if (market === 'US') return quantity;
-  return unit === 'LOTS' ? quantity * 1000 : quantity;
+function convertToShares(quantity: unknown, unit: string, market: string): number {
+  const q = typeof quantity === 'number' ? quantity : parseFloat(String(quantity));
+  const safeQ = Number.isFinite(q) ? q : 0;
+  if (market === 'US') return safeQ;
+  return unit === 'LOTS' ? safeQ * 1000 : safeQ;
 }
 
 /**
@@ -89,9 +91,17 @@ export async function PUT(
     const isDayTrade = market === 'US' ? false : rawDayTrade;
 
     // 解析數量，確保是整數
-    const parsedQuantity = typeof quantity === 'number' ? Math.floor(quantity) : parseInt(String(quantity), 10);
+    const parsedQuantity =
+      market === 'US'
+        ? parseFloat(String(quantity))
+        : typeof quantity === 'number'
+          ? Math.floor(quantity)
+          : parseInt(String(quantity), 10);
     if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
-      return NextResponse.json({ error: '數量必須為正整數' }, { status: 400 });
+      return NextResponse.json({ error: '數量必須為正數' }, { status: 400 });
+    }
+    if (market === 'TW' && !Number.isInteger(parsedQuantity)) {
+      return NextResponse.json({ error: '台股數量必須為整數' }, { status: 400 });
     }
 
     // 檢查交易記錄是否存在
@@ -416,9 +426,13 @@ async function updatePositionFromTrades(positionId: string) {
 
   if (trades.length === 0) return;
 
+  const position = await prisma.position.findUnique({
+    where: { id: positionId },
+  });
+
   // 計算買入交易（將數量轉換為股數）
   const buyTrades = trades.filter((t: TradeRecord) => t.tradeType === 'BUY');
-  const m = (trades[0] as { market?: string }).market ?? 'TW';
+  const m = position?.market ?? (trades[0] as { market?: string }).market ?? 'TW';
   const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit, m), 0);
   const totalBuyAmount = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
@@ -434,7 +448,8 @@ async function updatePositionFromTrades(positionId: string) {
 
   // 計算損益（僅在有賣出時）
   const remainingQuantity = totalBuyQuantity - totalSellQuantity;
-  const isClosed = remainingQuantity === 0 && sellTrades.length > 0;
+  const QTY_EPS = 1e-6;
+  const isClosed = sellTrades.length > 0 && Math.abs(remainingQuantity) < QTY_EPS;
 
   // 計算總損益 = 賣出淨收入 - 對應買入成本
   const totalPnL = isClosed

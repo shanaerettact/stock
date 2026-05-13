@@ -211,22 +211,45 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
   );
 }
 
+/** 美股：用成交明細加權 sum(amount)/sum(qty) 作為成本价，避免 DB avg 曾錯成「各筆金額相加」 */
+type PositionWithTrades = Position & {
+  trades?: Array<{ tradeType: string; quantity: number; amount: number; unit: string }>;
+};
+
+function effectiveAvgEntryPrice(position: PositionWithTrades): number {
+  if (position.market !== 'US' || !position.trades?.length) {
+    return position.avgEntryPrice;
+  }
+  const buys = position.trades.filter((t) => t.tradeType === 'BUY');
+  let qsum = 0;
+  let asum = 0;
+  for (const t of buys) {
+    const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity));
+    if (!Number.isFinite(q) || q <= 0) continue;
+    qsum += q;
+    asum += t.amount;
+  }
+  return qsum > 0 ? asum / qsum : position.avgEntryPrice;
+}
+
 // 單一持倉列元件
 function PositionRow({ position, priceData, initialCapital, currencySuffix = '元' }: { position: Position; priceData?: StockPrice; initialCapital: number; currencySuffix?: string }) {
+  const positionX = position as PositionWithTrades;
+  const avgEntry = effectiveAvgEntryPrice(positionX);
   const closingPrice = priceData?.closingPrice;
   const change = priceData?.change;
   
   const originalStopLoss = position.stopLossPrice || 
-    Math.round(position.avgEntryPrice * 0.92 * 100) / 100;
+    Math.round(avgEntry * 0.92 * 100) / 100;
   
   const trailingStop = calculateTrailingStop(
-    position.avgEntryPrice,
+    avgEntry,
     closingPrice ?? null,
     originalStopLoss
   );
   
   const { amount: unrealizedPnL, percent: unrealizedPnLPercent } = calculateUnrealizedPnL(
-    position.avgEntryPrice,
+    avgEntry,
     closingPrice ?? null,
     position.totalQuantity
   );
@@ -296,7 +319,7 @@ function PositionRow({ position, priceData, initialCapital, currencySuffix = '�
 
       {/* 成本價 */}
       <td className="text-right py-3 px-4 text-gray-200">
-        {position.avgEntryPrice.toLocaleString()} {currencySuffix}
+        {avgEntry.toLocaleString()} {currencySuffix}
       </td>
 
       {/* 今日收盤價 */}

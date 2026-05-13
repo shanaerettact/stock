@@ -9,9 +9,11 @@ import { prisma } from '@/lib/prisma';
 /**
  * 將交易數量轉換為股數
  */
-function convertToShares(quantity: number, unit: string, market: string): number {
-  if (market === 'US') return quantity;
-  return unit === 'LOTS' ? quantity * 1000 : quantity;
+function convertToShares(quantity: unknown, unit: string, market: string): number {
+  const q = typeof quantity === 'number' ? quantity : parseFloat(String(quantity));
+  const safeQ = Number.isFinite(q) ? q : 0;
+  if (market === 'US') return safeQ;
+  return unit === 'LOTS' ? safeQ * 1000 : safeQ;
 }
 
 interface TradeRecord {
@@ -78,7 +80,8 @@ async function recalculatePosition(positionId: string) {
 
   // 計算損益（僅在有賣出時）
   const remainingQuantity = totalBuyQuantity - totalSellQuantity;
-  const isClosed = remainingQuantity === 0 && sellTrades.length > 0;
+  const QTY_EPS = 1e-6;
+  const isClosed = sellTrades.length > 0 && Math.abs(remainingQuantity) < QTY_EPS;
 
   // 計算總損益 = 賣出淨收入 - 對應買入成本
   const totalPnL = isClosed

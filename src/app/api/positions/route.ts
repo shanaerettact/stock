@@ -119,16 +119,19 @@ export async function POST(request: NextRequest) {
     const buyTrades = position.trades.filter(t => t.tradeType === 'BUY');
     const sellTrades = position.trades.filter(t => t.tradeType === 'SELL');
 
-    // 輔助函式：將交易數量轉換為股數
-    const convertToShares = (quantity: number, unit: string): number => {
-      return unit === 'LOTS' ? quantity * 1000 : quantity;
+    const m = position.market ?? 'TW';
+    const convertToShares = (quantity: unknown, unit: string): number => {
+      const q = typeof quantity === 'number' ? quantity : parseFloat(String(quantity));
+      const safeQ = Number.isFinite(q) ? q : 0;
+      if (m === 'US') return safeQ;
+      return unit === 'LOTS' ? safeQ * 1000 : safeQ;
     };
 
     // 檢查是否已完全賣出（需要將數量轉換為股數）
     const totalBuyQuantity = buyTrades.reduce((sum, t) => sum + convertToShares(t.quantity, t.unit), 0);
     const totalSellQuantity = sellTrades.reduce((sum, t) => sum + convertToShares(t.quantity, t.unit), 0);
 
-    if (totalBuyQuantity !== totalSellQuantity) {
+    if (Math.abs(totalBuyQuantity - totalSellQuantity) > 1e-6) {
       return NextResponse.json(
         { error: '買賣數量不匹配，無法平倉' },
         { status: 400 }

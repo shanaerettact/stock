@@ -2272,6 +2272,17 @@ export const stockList: Stock[] = [
   { code: "9958", name: "世紀鋼", market: "上市" },
   { code: "9960", name: "邁達康", market: "上櫃" },
   { code: "9962", name: "有益", market: "上櫃" },
+  { code: "AMAT", name: "Applied Materials Inc.", market: "US" },
+  { code: "AMD", name: "ADVANCED MICRO DEVICES INC", market: "US" },
+  { code: "BE", name: "Bloom Energy Corp", market: "US" },
+  { code: "GOOG", name: "Alphabet Inc.", market: "US" },
+  { code: "ITA", name: "iShares Dow Jones U.S. Aerospace & Defense Index Fund", market: "US" },
+  { code: "MU", name: "Micron Technology", market: "US" },
+  { code: "SSO", name: "ProShares Ultra S&P500", market: "US" },
+  { code: "USD", name: "ProShares Ultra Semiconductors", market: "US" },
+  { code: "VRT", name: "Vertiv Holdings Co", market: "US" },
+  { code: "VOO", name: "Vanguard S&P 500 ETF", market: "US" },
+  { code: "VT", name: "Vanguard Total World Stock ETF", market: "US" },
 ];
 
 // 建立代號查詢映射

@@ -43,7 +43,7 @@ model Trade {
   
   // 價格與數量
   price             Float     // 成交價格（每股）
-  quantity          Int       // 數量（依據 unit 而定）
+  quantity          Float     // 數量（依據 unit 而定；美股可為小數股）
   unit              String    @default("SHARES") // 單位：SHARES(零股) / LOTS(張)
   
   // 自動計算欄位
@@ -86,7 +86,7 @@ model Position {
   // 開倉資訊
   entryDate         DateTime     // 開倉日期（首次買進）
   avgEntryPrice     Float        // 平均買入價
-  totalQuantity     Int          // 總股數
+  totalQuantity     Float        // 總股數（美股可為小數股）
   
   // 平倉資訊
   exitDate          DateTime?    // 平倉日期（完全賣出）

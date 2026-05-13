@@ -51,21 +51,27 @@ export function validatePrice(price: string | number): ValidationResult {
 
 export function validateQuantity(
   quantity: string | number,
-  unit: 'SHARES' | 'LOTS' = 'SHARES'
+  unit: 'SHARES' | 'LOTS' = 'SHARES',
+  market: 'TW' | 'US' = 'TW'
 ): ValidationResult {
-  const numQuantity = typeof quantity === 'string' ? parseInt(quantity) : quantity;
   const unitName = unit === 'SHARES' ? '股數' : '張數';
-  
+  const numQuantity =
+    typeof quantity === 'string'
+      ? market === 'US'
+        ? parseFloat(quantity)
+        : parseInt(quantity, 10)
+      : quantity;
+
   if (isNaN(numQuantity)) {
     return { isValid: false, error: `請輸入有效的${unitName}` };
   }
   if (numQuantity <= 0) {
     return { isValid: false, error: `${unitName}必須大於 0` };
   }
-  if (!Number.isInteger(numQuantity)) {
+  if (market === 'TW' && !Number.isInteger(numQuantity)) {
     return { isValid: false, error: `${unitName}必須為整數` };
   }
-  
+
   const maxQuantity = unit === 'SHARES' ? 1000000 : 10000;
   if (numQuantity > maxQuantity) {
     return { isValid: false, error: `${unitName}似乎過大，請確認` };
@@ -144,7 +150,7 @@ export function validateTradeForm(data: TradeFormInput): {
   const priceResult = validatePrice(data.price);
   if (!priceResult.isValid) errors.price = priceResult.error;
   
-  const quantityResult = validateQuantity(data.quantity, data.unit || 'SHARES');
+  const quantityResult = validateQuantity(data.quantity, data.unit || 'SHARES', market);
   if (!quantityResult.isValid) errors.quantity = quantityResult.error;
   
   const dateResult = validateDate(data.tradeDate);

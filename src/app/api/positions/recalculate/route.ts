@@ -56,7 +56,16 @@ async function recalculatePosition(positionId: string) {
   const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit, m), 0);
   const totalBuyAmount = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
-  const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
+  const avgEntryPrice =
+    totalBuyQuantity > 0
+      ? m === 'US'
+        ? buyTrades.reduce(
+            (sum: number, t: TradeRecord) =>
+              sum + Number(t.price) * convertToShares(t.quantity, t.unit, m),
+            0
+          ) / totalBuyQuantity
+        : totalBuyAmount / totalBuyQuantity
+      : 0;
 
   // 根據買入資訊計算停損
   // 停損價 = 成本價 × 92%（容忍 8% 虧損）

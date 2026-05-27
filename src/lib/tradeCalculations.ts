@@ -10,6 +10,9 @@ const TAX_RATE_STOCK = 0.003; // 一般股票 0.3%（賣出）
 const TAX_RATE_STOCK_DAY_TRADE = 0.0015; // 現股當沖 0.15%（賣出）
 const TAX_RATE_ETF_TDR_WARRANT = 0.001; // ETF / 權證 / TDR 0.1%（賣出）
 const SHARES_PER_LOT = 1000; // 台股一張 = 1000 股
+/** 美股：手續費率 0.1%，每筆上限 1 美元 */
+const US_COMMISSION_RATE = 0.001;
+const US_COMMISSION_MAX_USD = 1;
 /** 美股賣出約當 SEC Section 31 費率（簡化，僅供試算） */
 const US_SELL_REGULATORY_FEE_RATE = 0.0000278;
 
@@ -71,10 +74,14 @@ export function calculateAmount(price: number, quantity: number, unit: TradeUnit
 /**
  * 計算手續費（買賣都有）
  * @param amount 成交金額
- * @returns 手續費 = amount × 0.1425% × 0.6
+ * @returns 手續費（台股：0.1425%×六折；美股：成交金額 0.1%，每筆最高 1 美元）
  */
 export function calculateCommission(amount: number, totalShares: number, unit: TradeUnit, market: MarketRegion = 'TW'): number {
-  if (market === 'US') return 0;
+  if (market === 'US') {
+    const raw = amount * US_COMMISSION_RATE;
+    const capped = Math.min(raw, US_COMMISSION_MAX_USD);
+    return Math.round(capped * 100) / 100;
+  }
   const commission = amount * COMMISSION_RATE * COMMISSION_DISCOUNT;
   const isOddLot = unit === 'SHARES' && totalShares < SHARES_PER_LOT;
   const minimum = isOddLot ? 1 : 20;

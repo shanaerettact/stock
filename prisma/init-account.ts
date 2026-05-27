@@ -49,6 +49,7 @@ interface TRec {
   tradeType: string;
   quantity: number;
   unit: string;
+  price: number;
   amount: number;
   commission: number;
   tax: number;
@@ -78,7 +79,15 @@ async function updatePositionFromTrades(positionId: string) {
   const totalBuyQuantity = buyTrades.reduce((s, t) => s + convertToShares(t.quantity, t.unit, m), 0);
   const totalBuyAmount = buyTrades.reduce((s, t) => s + t.amount, 0);
   const totalBuyCommission = buyTrades.reduce((s, t) => s + t.commission, 0);
-  const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
+  const avgEntryPrice =
+    totalBuyQuantity > 0
+      ? m === 'US'
+        ? buyTrades.reduce(
+            (s, t) => s + Number(t.price) * convertToShares(t.quantity, t.unit, m),
+            0
+          ) / totalBuyQuantity
+        : totalBuyAmount / totalBuyQuantity
+      : 0;
 
   const sellTrades = trades.filter((t: TRec) => t.tradeType === 'SELL');
   const totalSellQuantity = sellTrades.reduce((s, t) => s + convertToShares(t.quantity, t.unit, m), 0);

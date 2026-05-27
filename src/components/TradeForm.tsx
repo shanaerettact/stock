@@ -125,6 +125,40 @@ export default function TradeForm({
     }
   }, [isUS, initialData]);
 
+  // 美股：本地 stockList 無名稱時，向 Yahoo 行情 API 查 longName（與持倉頁取得收盤價同源）
+  useEffect(() => {
+    if (!isUS) return;
+    const raw = formData.stockCode.trim();
+    if (!raw || !/^[A-Z]{1,10}(\.[A-Z]{1,2})?$/i.test(raw)) return;
+    const code = raw.toUpperCase();
+    if (getStockNameByCode(code)) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/stock-price?codes=${encodeURIComponent(code)}`, {
+          cache: 'no-store',
+        });
+        const json = await res.json();
+        const row = Array.isArray(json?.data) ? json.data[0] : undefined;
+        const yName = typeof row?.stockName === 'string' ? row.stockName.trim() : '';
+        if (cancelled || !yName) return;
+        setFormData(prev => {
+          if (prev.stockCode.trim().toUpperCase() !== code) return prev;
+          if (prev.stockName.trim()) return prev;
+          return { ...prev, stockName: yName };
+        });
+      } catch {
+        /* 略過：網路或來源失敗時維持手動輸入 */
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isUS, formData.stockCode]);
+
   // 即時計算預覽與自動計算停損價（買入價 × 92%）
   useEffect(() => {
     const price = parseFloat(formData.price);
@@ -213,7 +247,11 @@ export default function TradeForm({
       if (isUS) {
         const u = value.trim().toUpperCase();
         const name = getStockNameByCode(u);
-        setFormData(prev => ({ ...prev, stockCode: u, ...(name ? { stockName: name } : {}) }));
+        setFormData(prev => ({
+          ...prev,
+          stockCode: u,
+          ...(name ? { stockName: name } : { stockName: '' }),
+        }));
       } else {
         const name = getStockNameByCode(value.trim());
         if (name) {
@@ -443,7 +481,7 @@ export default function TradeForm({
           )}
           {isUS && (
             <p className="mt-1 text-xs text-blue-400">
-              💡 美股以「股」為單位；手續費試算為 0，賣出含簡化規費
+              💡 美股以「股」為單位；手續費試算為成交額 0.1%（每筆最高 1 美元），賣出另含簡化規費
             </p>
           )}
         </div>
@@ -467,7 +505,7 @@ export default function TradeForm({
           </select>
           <p className="mt-1 text-xs text-blue-400">
             {isUS
-              ? '💡 美股試算：手續費 0；賣出為簡化規費（非台股交易稅）'
+              ? '💡 美股試算：手續費 0.1%／筆上限 1 美元；賣出另計簡化規費（非台股交易稅）'
               : '💡 稅率：股票 0.3%（當沖 0.15%）、ETF/TDR/權證 0.1%（賣出時）'}
           </p>
         </div>
@@ -528,7 +566,7 @@ export default function TradeForm({
               {preview.amount.toLocaleString('zh-TW')} {priceSuffix}
             </div>
             
-            <div className="text-gray-400">{isUS ? '手續費（試算）：' : '手續費（六折）：'}</div>
+            <div className="text-gray-400">{isUS ? '手續費（0.1%·上限 1 美元）：' : '手續費（六折）：'}</div>
             <div className="font-semibold text-right text-orange-400">
               {preview.commission.toLocaleString('zh-TW')} {priceSuffix}
             </div>
@@ -600,7 +638,7 @@ export default function TradeForm({
       
       <p className="text-xs text-gray-500 text-center">
         {isUS ? (
-          <>* 美股金額以美元計；帳戶餘額僅反映台股，美股不併入同一餘額。</>
+          <>* 美股金額以美元計；手續費試算為 0.1%、每筆最高 1 美元。帳戶餘額僅反映台股，美股不併入同一餘額。</>
         ) : (
           <>
         * 為必填欄位。手續費與交易稅將自動計算（手續費六折，賣出時收取 0.3% 交易稅）<br />

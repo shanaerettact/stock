@@ -251,6 +251,7 @@ interface TradeRecord {
   tradeType: string;
   quantity: number;
   unit: string;
+  price: number;
   amount: number;
   commission: number;
   tax: number;
@@ -295,7 +296,16 @@ async function updatePositionFromTrades(positionId: string) {
   const totalBuyQuantity = buyTrades.reduce((sum: number, t: TradeRecord) => sum + convertToShares(t.quantity, t.unit, m), 0);
   const totalBuyAmount = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.amount, 0);
   const totalBuyCommission = buyTrades.reduce((sum: number, t: TradeRecord) => sum + t.commission, 0);
-  const avgEntryPrice = totalBuyQuantity > 0 ? totalBuyAmount / totalBuyQuantity : 0;
+  const avgEntryPrice =
+    totalBuyQuantity > 0
+      ? m === 'US'
+        ? buyTrades.reduce(
+            (sum: number, t: TradeRecord) =>
+              sum + Number(t.price) * convertToShares(t.quantity, t.unit, m),
+            0
+          ) / totalBuyQuantity
+        : totalBuyAmount / totalBuyQuantity
+      : 0;
 
   // 計算賣出交易（將數量轉換為股數）
   const sellTrades = trades.filter((t: TradeRecord) => t.tradeType === 'SELL');

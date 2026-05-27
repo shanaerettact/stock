@@ -211,9 +211,9 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
   );
 }
 
-/** 美股：用成交明細加權 sum(amount)/sum(qty) 作為成本价，避免 DB avg 曾錯成「各筆金額相加」 */
+/** 美股：加權成交價 Σ(價×股數)/Σ股數，與交易列表「成交價」及後端 avgEntryPrice 一致 */
 type PositionWithTrades = Position & {
-  trades?: Array<{ tradeType: string; quantity: number; amount: number; unit: string }>;
+  trades?: Array<{ tradeType: string; quantity: number; amount: number; unit: string; price: number }>;
 };
 
 function effectiveAvgEntryPrice(position: PositionWithTrades): number {
@@ -222,14 +222,16 @@ function effectiveAvgEntryPrice(position: PositionWithTrades): number {
   }
   const buys = position.trades.filter((t) => t.tradeType === 'BUY');
   let qsum = 0;
-  let asum = 0;
+  let psum = 0;
   for (const t of buys) {
     const q = typeof t.quantity === 'number' ? t.quantity : parseFloat(String(t.quantity));
     if (!Number.isFinite(q) || q <= 0) continue;
+    const px = typeof t.price === 'number' ? t.price : parseFloat(String(t.price));
+    if (!Number.isFinite(px)) continue;
     qsum += q;
-    asum += t.amount;
+    psum += px * q;
   }
-  return qsum > 0 ? asum / qsum : position.avgEntryPrice;
+  return qsum > 0 ? psum / qsum : position.avgEntryPrice;
 }
 
 // 單一持倉列元件

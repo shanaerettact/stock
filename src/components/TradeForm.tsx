@@ -454,6 +454,7 @@ export default function TradeForm({
                 min="1"
                 value={formData.quantity}
                 onChange={(e) => handleChange('quantity', e.target.value)}
+                onWheel={(e) => e.currentTarget.blur()}
                 placeholder={isUS ? '10' : (formData.unit === 'SHARES' ? '100' : '1')}
                 className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-gray-800 text-gray-100 ${
                   errors.quantity

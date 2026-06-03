@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PATCH /api/positions?id=xxx - 更新部位備註
+// PATCH /api/positions?id=xxx - 更新部位欄位（notes / stopLossPrice）
 export async function PATCH(request: NextRequest) {
   try {
     const id = request.nextUrl.searchParams.get('id');
@@ -58,17 +58,27 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: '缺少部位 ID' }, { status: 400 });
     }
     const body = await request.json().catch(() => ({}));
-    const notes = body?.notes;
-    const notesValue = notes === undefined || notes === null || typeof notes !== 'string' ? null : notes;
+    const updateData: Record<string, unknown> = {};
+
+    if ('notes' in body) {
+      updateData.notes = typeof body.notes === 'string' ? body.notes : null;
+    }
+    if ('stopLossPrice' in body) {
+      updateData.stopLossPrice = typeof body.stopLossPrice === 'number' ? body.stopLossPrice : null;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ error: '沒有可更新的欄位' }, { status: 400 });
+    }
 
     const position = await prisma.position.update({
       where: { id },
-      data: { notes: notesValue },
+      data: updateData,
       include: { trades: true },
     });
     return NextResponse.json(position);
   } catch (error: unknown) {
-    console.error('更新部位備註失敗:', error);
+    console.error('更新部位失敗:', error);
     const err = error as { code?: string };
     if (err?.code === 'P2025') {
       return NextResponse.json({ error: '找不到該部位' }, { status: 404 });

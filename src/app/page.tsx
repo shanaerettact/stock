@@ -144,6 +144,10 @@ export default function HomePage() {
     setShowForm(false);
   };
 
+  const handlePositionStopLossUpdate = (id: string, stopLossPrice: number) => {
+    setPositions(prev => prev.map(p => p.id === id ? { ...p, stopLossPrice } : p));
+  };
+
   const handleUpdateCapital = async (newCapital: number) => {
     try {
       const response = await fetch('/api/account', {
@@ -276,11 +280,12 @@ export default function HomePage() {
             </div>
 
             {/* 持倉部位 */}
-            <PositionsTable 
-              positions={positions} 
+            <PositionsTable
+              positions={positions}
               initialCapital={initialCapital}
               onMessage={showMessage}
               currencySuffix={activeMarket === 'US' ? '美元' : '元'}
+              onPositionStopLossUpdate={handlePositionStopLossUpdate}
             />
 
             {/* 最近交易記錄 */}

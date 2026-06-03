@@ -9,9 +9,10 @@ interface PositionsTableProps {
   initialCapital?: number;
   onMessage?: (type: 'success' | 'error', text: string) => void;
   currencySuffix?: string;
+  onPositionStopLossUpdate?: (id: string, stopLossPrice: number) => void;
 }
 
-export default function PositionsTable({ positions, initialCapital = 100000, onMessage, currencySuffix = '元' }: PositionsTableProps) {
+export default function PositionsTable({ positions, initialCapital = 100000, onMessage, currencySuffix = '元', onPositionStopLossUpdate }: PositionsTableProps) {
   const [stockPrices, setStockPrices] = useState<Record<string, StockPrice>>({});
   const [fetchingPrices, setFetchingPrices] = useState(false);
   const [pricesFetchedAt, setPricesFetchedAt] = useState<string | null>(null);
@@ -35,13 +36,13 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
       setFetchingPrices(true);
       const stockCodes = openPositions.map(p => p.stockCode).join(',');
       const response = await fetch(`/api/stock-price?codes=${stockCodes}`);
-      
+
       if (!response.ok) {
         throw new Error('取得收盤價失敗');
       }
 
       const result = await response.json();
-      
+
       if (result.success && result.data) {
         const pricesMap: Record<string, StockPrice> = {};
         result.data.forEach((price: StockPrice) => {
@@ -49,7 +50,41 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
         });
         setStockPrices(pricesMap);
         setPricesFetchedAt(new Date().toLocaleTimeString('zh-TW'));
-        onMessage?.('success', '✅ 已取得今日收盤價！');
+
+        // 計算追蹤停損，若高於 DB 儲存值則更新，確保停損只升不降
+        let updatedCount = 0;
+        const savePromises = openPositions.map(async (position) => {
+          const priceData = pricesMap[position.stockCode];
+          const closingPrice = priceData?.closingPrice ?? null;
+          if (closingPrice === null) return;
+
+          const posX = position as PositionWithTrades;
+          const avgEntry = effectiveAvgEntryPrice(posX);
+          const originalStop = position.stopLossPrice ?? Math.round(avgEntry * 0.92 * 100) / 100;
+
+          const trailing = calculateTrailingStop(avgEntry, closingPrice, originalStop);
+          if (!trailing || !trailing.isActivated) return;
+
+          // 追蹤停損啟動且高於目前 DB 儲存的停損價時才更新
+          const currentDBStop = position.stopLossPrice ?? 0;
+          if (trailing.stopLossPrice > currentDBStop) {
+            try {
+              await fetch(`/api/positions?id=${position.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stopLossPrice: trailing.stopLossPrice }),
+              });
+              onPositionStopLossUpdate?.(position.id, trailing.stopLossPrice);
+              updatedCount++;
+            } catch (err) {
+              console.warn(`${position.stockCode} 追蹤停損更新失敗:`, err);
+            }
+          }
+        });
+        await Promise.all(savePromises);
+
+        const updateMsg = updatedCount > 0 ? `，已鎖定 ${updatedCount} 檔追蹤停損` : '';
+        onMessage?.('success', `✅ 已取得今日收盤價${updateMsg}！`);
       } else {
         throw new Error(result.error || '取得收盤價失敗');
       }

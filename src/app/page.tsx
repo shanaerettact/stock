@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
 import DataModal from '@/components/DataModal';
+import AIAnalysisModal from '@/components/AIAnalysisModal';
 import PositionsTable from '@/components/PositionsTable';
 import type { Trade, Position } from '@/lib/types';
 
@@ -22,6 +23,11 @@ export default function HomePage() {
   const [accountBalance, setAccountBalance] = useState(100000);
   const [initialCapital, setInitialCapital] = useState(100000);
   const [recalculating, setRecalculating] = useState(false);
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [allTWTrades, setAllTWTrades] = useState<Trade[]>([]);
+  const [allUSTrades, setAllUSTrades] = useState<Trade[]>([]);
+  const [allTWPositions, setAllTWPositions] = useState<Position[]>([]);
+  const [allUSPositions, setAllUSPositions] = useState<Position[]>([]);
 
   // 顯示訊息
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -206,6 +212,23 @@ export default function HomePage() {
     }
   };
 
+  const handleOpenAIModal = async () => {
+    const timestamp = Date.now();
+    try {
+      const [twTradesRes, usTradesRes, twPosRes, usPosRes] = await Promise.all([
+        fetch(`/api/trades?accountId=${ACCOUNT_ID}&market=TW&_t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/trades?accountId=${ACCOUNT_ID}&market=US&_t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/positions?accountId=${ACCOUNT_ID}&market=TW&_t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/positions?accountId=${ACCOUNT_ID}&market=US&_t=${timestamp}`, { cache: 'no-store' }),
+      ]);
+      if (twTradesRes.ok) setAllTWTrades(await twTradesRes.json());
+      if (usTradesRes.ok) setAllUSTrades(await usTradesRes.json());
+      if (twPosRes.ok) setAllTWPositions(await twPosRes.json());
+      if (usPosRes.ok) setAllUSPositions(await usPosRes.json());
+    } catch { /* use existing data if fetch fails */ }
+    setShowAIModal(true);
+  };
+
   const openPositions = positions.filter(p => p.status === 'OPEN');
   const closedPositions = positions.filter(p => p.status === 'CLOSED');
 
@@ -259,7 +282,13 @@ export default function HomePage() {
             </div>
 
             {/* 工具按鈕 */}
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={handleOpenAIModal}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-gray-200 font-medium rounded-lg transition-colors text-sm border border-purple-600"
+              >
+                🤖 AI 分析
+              </button>
               <button
                 onClick={handleRecalculatePositions}
                 disabled={recalculating}
@@ -306,6 +335,16 @@ export default function HomePage() {
 
             {/* 功能介紹卡片：先載入最新資料再開啟 Modal，確保已平倉／R 值即時 */}
             <FeatureCards onSelect={async (key) => { await loadData(); setSelectedFeature(key); }} />
+
+            {/* AI 分析 Modal */}
+            <AIAnalysisModal
+              isOpen={showAIModal}
+              onClose={() => setShowAIModal(false)}
+              twTrades={allTWTrades}
+              usTrades={allUSTrades}
+              twPositions={allTWPositions}
+              usPositions={allUSPositions}
+            />
 
             {/* 資料統計 Modal */}
             {selectedFeature && (

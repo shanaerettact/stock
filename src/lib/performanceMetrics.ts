@@ -308,6 +308,94 @@ export function analyzeRiskReward(positions: ClosedPosition[]): RiskRewardProfil
   };
 }
 
+// ===== 進場訊號 / 加碼分析 =====
+
+export type PyramidType = 'single' | 'pyramid_up' | 'pyramid_down';
+
+export interface PyramidBuyTrade {
+  price: number;
+  quantity: number;
+  tradeDate: string | Date;
+}
+
+/**
+ * 依買進交易序列判斷加碼類型
+ * - 僅 1 筆買進 → single（單筆進場）
+ * - 多筆買進：比較首筆價格與後續買進的加權均價，後續均價 > 首筆 → pyramid_up（順勢加碼），否則 → pyramid_down（逆勢攤平）
+ */
+export function getPyramidType(buyTrades: PyramidBuyTrade[]): PyramidType {
+  if (buyTrades.length <= 1) {
+    return 'single';
+  }
+
+  const sorted = [...buyTrades].sort(
+    (a, b) => new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime()
+  );
+  const [first, ...rest] = sorted;
+  const totalQty = rest.reduce((sum, t) => sum + t.quantity, 0);
+  const avgRestPrice = totalQty > 0
+    ? rest.reduce((sum, t) => sum + t.price * t.quantity, 0) / totalQty
+    : rest.reduce((sum, t) => sum + t.price, 0) / rest.length;
+
+  return avgRestPrice > (first as PyramidBuyTrade).price ? 'pyramid_up' : 'pyramid_down';
+}
+
+export interface GroupedMetrics<K> {
+  key: K;
+  label: string;
+  metrics: PerformanceMetrics;
+}
+
+const SETUP_TYPE_UNTAGGED = '未標記';
+
+/**
+ * 依進場訊號標籤（setupType）分組計算績效指標
+ * @param positions 已平倉部位（含 setupType）
+ * @returns 各標籤的績效指標（null/空字串歸類為「未標記」）
+ */
+export function analyzeBySetupType(
+  positions: (ClosedPosition & { setupType: string | null | undefined })[]
+): GroupedMetrics<string>[] {
+  const groups = new Map<string, ClosedPosition[]>();
+
+  positions.forEach(p => {
+    const key = p.setupType || SETUP_TYPE_UNTAGGED;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key)!.push(p);
+  });
+
+  return Array.from(groups.entries()).map(([key, groupPositions]) => ({
+    key,
+    label: key,
+    metrics: calculatePerformanceMetrics(groupPositions),
+  }));
+}
+
+const PYRAMID_TYPE_LABELS: Record<PyramidType, string> = {
+  single: '單筆進場',
+  pyramid_up: '順勢加碼',
+  pyramid_down: '逆勢攤平',
+};
+
+/**
+ * 依加碼類型（pyramidType）分組計算績效指標
+ * @param positions 已平倉部位（含 pyramidType）
+ * @returns 三種加碼類型的績效指標
+ */
+export function analyzePyramiding(
+  positions: (ClosedPosition & { pyramidType: PyramidType })[]
+): GroupedMetrics<PyramidType>[] {
+  const order: PyramidType[] = ['single', 'pyramid_up', 'pyramid_down'];
+
+  return order.map(key => ({
+    key,
+    label: PYRAMID_TYPE_LABELS[key],
+    metrics: calculatePerformanceMetrics(positions.filter(p => p.pyramidType === key)),
+  }));
+}
+
 // ===== 輔助函式 =====
 
 function getEmptyMetrics(): PerformanceMetrics {

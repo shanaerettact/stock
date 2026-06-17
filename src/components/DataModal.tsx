@@ -1,11 +1,38 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { createChart, createSeriesMarkers, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
-import type { Trade, Position } from '@/lib/types';
+import { createChart, createSeriesMarkers, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
+import { SETUP_TYPES, type Trade, type Position } from '@/lib/types';
 import { getStockMarketByCode } from '@/data/stockList';
+import {
+  type ClosedPosition,
+  type PerformanceMetrics,
+  getPyramidType,
+  analyzeBySetupType,
+  analyzePyramiding,
+} from '@/lib/performanceMetrics';
 
-type ChartCandle = { date: string; open: number; high: number; low: number; close: number; volume?: number; entry?: number; exit?: number };
+type ChartCandle = {
+  date: string; open: number; high: number; low: number; close: number; volume?: number;
+  entry?: number; exit?: number; pyramidBuy?: number;
+  ma20?: number | null; ma50?: number | null; ma200?: number | null;
+};
+
+const MA_SERIES_CONFIG: { key: 'ma20' | 'ma50' | 'ma200'; color: string; label: string }[] = [
+  { key: 'ma20', color: '#3b82f6', label: 'MA20' },
+  { key: 'ma50', color: '#f97316', label: 'MA50' },
+  { key: 'ma200', color: '#a855f7', label: 'MA200' },
+];
+
+function toClosedPosition(p: Position & { holdingDays?: number | null }): ClosedPosition {
+  return {
+    totalPnL: p.totalPnL ?? 0,
+    returnRate: p.returnRate ?? 0,
+    rValue: p.rValue,
+    holdingDays: p.holdingDays ?? 0,
+    exitDate: p.exitDate ? new Date(p.exitDate) : new Date(),
+  };
+}
 
 interface DataModalProps {
   isOpen: boolean;
@@ -37,6 +64,8 @@ export default function DataModal({
   const [editingNoteValue, setEditingNoteValue] = useState('');
   const [positionNotes, setPositionNotes] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState(false);
+  const [editingSetupType, setEditingSetupType] = useState('');
+  const [savingSetupType, setSavingSetupType] = useState(false);
 
   useEffect(() => {
     if (!isOpen || type !== 'performance') setPerformanceDetailView(null);
@@ -68,6 +97,7 @@ export default function DataModal({
     }
     setChartPosition(position);
     setEditingNoteValue(positionNotes[position.id] ?? position.notes ?? '');
+    setEditingSetupType(position.setupType ?? '');
     setChartError(null);
     setChartData([]);
     setChartLoading(true);
@@ -101,17 +131,29 @@ export default function DataModal({
       }
       const entryStr = entryDate.toLocaleDateString('sv');
       const exitStr = exitDate.toLocaleDateString('sv');
+      // 第 2 筆及後續買進交易視為加碼，依日期標記
+      const buyTrades = [...(position.trades ?? [])]
+        .filter(t => t.tradeType === 'BUY')
+        .sort((a, b) => new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime());
+      const pyramidBuyByDate = new Map<string, number>();
+      buyTrades.slice(1).forEach(t => {
+        pyramidBuyByDate.set(new Date(t.tradeDate).toLocaleDateString('sv'), t.price);
+      });
       const data: ChartCandle[] = raw
-        .map((d: { date?: string; open?: number | null; high?: number | null; low?: number | null; close?: number | null; volume?: number | null }) => {
+        .map((d: { date?: string; open?: number | null; high?: number | null; low?: number | null; close?: number | null; volume?: number | null; ma20?: number | null; ma50?: number | null; ma200?: number | null }) => {
           const o = d.open != null ? Number(d.open) : NaN;
           const h = d.high != null ? Number(d.high) : NaN;
           const l = d.low != null ? Number(d.low) : NaN;
           const c = d.close != null ? Number(d.close) : NaN;
           if (!d.date || isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) return null;
           const vol = d.volume != null ? Number(d.volume) : undefined;
-          const candle: ChartCandle = { date: d.date, open: o, high: h, low: l, close: c, volume: vol && !isNaN(vol) ? vol : undefined };
+          const candle: ChartCandle = {
+            date: d.date, open: o, high: h, low: l, close: c, volume: vol && !isNaN(vol) ? vol : undefined,
+            ma20: d.ma20 ?? null, ma50: d.ma50 ?? null, ma200: d.ma200 ?? null,
+          };
           if (d.date === entryStr) candle.entry = position.avgEntryPrice;
           if (d.date === exitStr) candle.exit = position.avgExitPrice!;
+          if (pyramidBuyByDate.has(d.date)) candle.pyramidBuy = pyramidBuyByDate.get(d.date);
           return candle;
         })
         .filter((c: ChartCandle | null): c is ChartCandle => c != null);
@@ -131,6 +173,7 @@ export default function DataModal({
     setChartData([]);
     setChartError(null);
     setEditingNoteValue('');
+    setEditingSetupType('');
   }, []);
 
   const resetChartNoteDraft = useCallback(() => {
@@ -158,6 +201,24 @@ export default function DataModal({
       setSavingNote(false);
     }
   }, [editingNoteValue, positionNotes]);
+
+  const saveSetupType = useCallback(async (positionId: string, value: string) => {
+    setSavingSetupType(true);
+    try {
+      const res = await fetch(`/api/positions?id=${positionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ setupType: value }),
+      });
+      if (!res.ok) throw new Error('儲存失敗');
+      setEditingSetupType(value);
+      setChartPosition(prev => (prev ? { ...prev, setupType: value || null } : prev));
+    } catch (e) {
+      console.warn('訊號標籤儲存失敗', e);
+    } finally {
+      setSavingSetupType(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!chartContainerRef.current || !chartData.length) return;
@@ -204,11 +265,33 @@ export default function DataModal({
       volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.7, bottom: 0 } });
       volumeSeries.setData(volumeData);
     }
+    // MA20/50/200 疊圖
+    MA_SERIES_CONFIG.forEach(({ key, color }) => {
+      const lineData = chartData
+        .filter(d => d[key] != null)
+        .map(d => ({ time: d.date, value: d[key] as number }));
+      if (lineData.length > 0) {
+        const maSeries = chart.addSeries(LineSeries, {
+          color,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        maSeries.setData(lineData);
+      }
+    });
     const markers: { time: string; position: 'belowBar' | 'aboveBar'; color: string; shape: 'arrowUp' | 'arrowDown'; text: string }[] = [];
     const entryCandle = chartData.find(d => d.entry != null);
     if (entryCandle) markers.push({ time: entryCandle.date, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: `進場 ${chartPosition?.avgEntryPrice?.toLocaleString() ?? ''}` });
+    chartData.forEach(d => {
+      if (d.pyramidBuy != null) {
+        markers.push({ time: d.date, position: 'belowBar', color: '#eab308', shape: 'arrowUp', text: `加碼 ${d.pyramidBuy.toLocaleString()}` });
+      }
+    });
     const exitCandle = chartData.find(d => d.exit != null);
     if (exitCandle) markers.push({ time: exitCandle.date, position: 'aboveBar', color: '#ef4444', shape: 'arrowDown', text: `出場 ${chartPosition?.avgExitPrice?.toLocaleString() ?? ''}` });
+    markers.sort((a, b) => a.time.localeCompare(b.time));
     if (markers.length) createSeriesMarkers(candlestickSeries, markers);
     chart.timeScale().fitContent();
     const handleResize = () => chart.applyOptions({ width: chartContainerRef.current?.clientWidth ?? 400 });
@@ -569,6 +652,89 @@ export default function DataModal({
                     </table>
                   </div>
                 </div>
+              );
+            })()}
+            {performance.closedPositions.length > 0 && (() => {
+              const th = 'px-3 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider border-b border-gray-600';
+              const td = 'px-3 py-2 text-sm text-gray-300 border-b border-gray-700/80';
+
+              const closedForSetup = performance.closedPositions.map(p => ({
+                ...toClosedPosition(p),
+                setupType: p.setupType,
+              }));
+              const setupGroups = analyzeBySetupType(closedForSetup).filter(g => g.metrics.totalTrades > 0);
+
+              const closedForPyramid = performance.closedPositions.map(p => {
+                const buyTrades = (p.trades ?? [])
+                  .filter(t => t.tradeType === 'BUY')
+                  .map(t => ({ price: t.price, quantity: t.quantity, tradeDate: t.tradeDate }));
+                return { ...toClosedPosition(p), pyramidType: getPyramidType(buyTrades) };
+              });
+              const pyramidGroups = analyzePyramiding(closedForPyramid);
+
+              const renderMetricsRow = (key: string, label: string, m: PerformanceMetrics) => (
+                <tr key={key} className="hover:bg-gray-800/50">
+                  <td className={td + ' font-medium text-gray-200 whitespace-nowrap'}>{label}</td>
+                  <td className={td}>{m.totalTrades}</td>
+                  <td className={td}>{m.totalTrades > 0 ? `${m.winRate.toFixed(1)}%` : '--'}</td>
+                  <td className={td}>
+                    <span className={m.avgRValue != null ? (m.avgRValue >= 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                      {m.avgRValue != null ? `${m.avgRValue >= 0 ? '+' : ''}${m.avgRValue.toFixed(2)}R` : '--'}
+                    </span>
+                  </td>
+                  <td className={td}>
+                    <span className={m.totalTrades > 0 ? (m.expectancy >= 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                      {m.totalTrades > 0 ? `${m.expectancy >= 0 ? '+' : ''}${Math.round(m.expectancy).toLocaleString()}` : '--'}
+                    </span>
+                  </td>
+                  <td className={td}>
+                    <span className={m.totalTrades > 0 ? (m.totalPnL >= 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                      {m.totalTrades > 0 ? `${m.totalPnL >= 0 ? '+' : ''}${m.totalPnL.toLocaleString()}` : '--'}
+                    </span>
+                  </td>
+                </tr>
+              );
+
+              const metricsHeader = (
+                <thead className="bg-gray-800">
+                  <tr>
+                    <th className={th}>類型</th>
+                    <th className={th}>筆數</th>
+                    <th className={th}>勝率</th>
+                    <th className={th}>平均R值</th>
+                    <th className={th}>期望值</th>
+                    <th className={th}>總損益</th>
+                  </tr>
+                </thead>
+              );
+
+              return (
+                <>
+                  {setupGroups.length > 0 && (
+                    <div>
+                      <h4 className="font-semibold text-gray-200 mb-3">🏷️ 依進場訊號分析</h4>
+                      <div className="overflow-x-auto rounded-lg border border-gray-700">
+                        <table className="w-full min-w-[560px]">
+                          {metricsHeader}
+                          <tbody>
+                            {setupGroups.map(g => renderMetricsRow(g.key, g.label, g.metrics))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <h4 className="font-semibold text-gray-200 mb-3">🔼 加碼策略分析</h4>
+                    <div className="overflow-x-auto rounded-lg border border-gray-700">
+                      <table className="w-full min-w-[560px]">
+                        {metricsHeader}
+                        <tbody>
+                          {pyramidGroups.map(g => renderMetricsRow(g.key, g.label, g.metrics))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
               );
             })()}
           </div>
@@ -1284,7 +1450,17 @@ export default function DataModal({
                   </div>
                 )}
                 {!chartLoading && !chartError && chartData.length > 0 && (
-                  <div ref={chartContainerRef} className="w-full" style={{ height: 280 }} />
+                  <>
+                    <div className="flex items-center gap-3 text-xs text-gray-400 mb-1">
+                      {MA_SERIES_CONFIG.map(({ key, color, label }) => (
+                        <span key={key} className="flex items-center gap-1">
+                          <span className="inline-block w-3 h-0.5" style={{ backgroundColor: color }} />
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                    <div ref={chartContainerRef} className="w-full" style={{ height: 280 }} />
+                  </>
                 )}
               </div>
               {!chartLoading && !chartError && chartData.length > 0 && chartPosition && (
@@ -1293,31 +1469,47 @@ export default function DataModal({
                   <span>出場：{chartPosition.exitDate ? new Date(chartPosition.exitDate).toLocaleDateString('zh-TW') : '-'} @ {(chartPosition.avgExitPrice ?? 0).toLocaleString()}</span>
                 </div>
               )}
-              <div className="mt-3 pt-3 border-t border-gray-700 shrink-0">
-                <div className="text-sm font-medium text-gray-300 mb-2">備註</div>
-                <textarea
-                  value={editingNoteValue}
-                  onChange={e => setEditingNoteValue(e.target.value)}
-                  placeholder="輸入備註..."
-                  className="w-full px-3 py-2 text-sm bg-gray-800 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[72px]"
-                  rows={3}
-                />
-                <div className="flex gap-2 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => saveNote(chartPosition.id)}
-                    disabled={savingNote}
-                    className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded"
+              <div className="mt-3 pt-3 border-t border-gray-700 shrink-0 space-y-3">
+                <div>
+                  <div className="text-sm font-medium text-gray-300 mb-2">訊號標籤</div>
+                  <select
+                    value={editingSetupType}
+                    onChange={(e) => saveSetupType(chartPosition.id, e.target.value)}
+                    disabled={savingSetupType}
+                    className="w-full px-3 py-2 text-sm bg-gray-800 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                   >
-                    {savingNote ? '儲存中...' : '儲存'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={resetChartNoteDraft}
-                    className="px-3 py-1.5 text-xs font-medium bg-gray-600 hover:bg-gray-500 text-gray-200 rounded"
-                  >
-                    取消
-                  </button>
+                    <option value="">不標記</option>
+                    {SETUP_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-gray-300 mb-2">備註</div>
+                  <textarea
+                    value={editingNoteValue}
+                    onChange={e => setEditingNoteValue(e.target.value)}
+                    placeholder="輸入備註..."
+                    className="w-full px-3 py-2 text-sm bg-gray-800 border border-gray-600 rounded text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[72px]"
+                    rows={3}
+                  />
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => saveNote(chartPosition.id)}
+                      disabled={savingNote}
+                      className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded"
+                    >
+                      {savingNote ? '儲存中...' : '儲存'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetChartNoteDraft}
+                      className="px-3 py-1.5 text-xs font-medium bg-gray-600 hover:bg-gray-500 text-gray-200 rounded"
+                    >
+                      取消
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

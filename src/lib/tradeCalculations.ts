@@ -15,6 +15,8 @@ const US_COMMISSION_RATE = 0.001;
 const US_COMMISSION_MAX_USD = 1;
 /** 美股賣出約當 SEC Section 31 費率（簡化，僅供試算） */
 const US_SELL_REGULATORY_FEE_RATE = 0.0000278;
+/** 預設停損比例（進場價 × (1 - 8%)） */
+export const DEFAULT_STOP_LOSS_PERCENT = 0.08;
 
 // ===== 型別定義 =====
 export type TradeUnit = 'SHARES' | 'LOTS'; // 零股 | 張
@@ -225,7 +227,62 @@ export interface PriceQuantity {
 export function calculateWeightedAvgPrice(trades: PriceQuantity[]): number {
   const totalAmount = trades.reduce((sum, t) => sum + t.price * t.quantity, 0);
   const totalQuantity = trades.reduce((sum, t) => sum + t.quantity, 0);
-  
+
   return totalQuantity > 0 ? totalAmount / totalQuantity : 0;
+}
+
+// ===== 風險%部位試算 =====
+
+export interface PositionSizeInput {
+  price: number; // 進場價格
+  riskAmount: number; // 可承受虧損金額
+  stopLossPercent?: number; // 停損比例（預設 DEFAULT_STOP_LOSS_PERCENT）
+  unit: TradeUnit; // 單位：零股(SHARES) 或 張(LOTS)
+  market: MarketRegion; // TW 台股 / US 美股
+}
+
+export interface PositionSizeResult {
+  stopLossPrice: number; // 建議停損價 = price × (1 - stopLossPercent)
+  riskPerShare: number; // 每股風險 = price - stopLossPrice
+  suggestedQuantity: number; // 建議數量（依 unit/market 顯示張或股）
+  suggestedShares: number; // 對應總股數
+  actualRiskAmount: number; // 依四捨五入後數量回推的實際風險金額
+}
+
+/**
+ * 依風險金額與停損比例反算建議部位大小
+ * @param params 試算輸入（進場價、可承受風險金額、停損比例、單位、市場）
+ * @returns 建議停損價、每股風險、建議數量與實際風險金額
+ */
+export function calculatePositionSize(params: PositionSizeInput): PositionSizeResult {
+  const { price, riskAmount, unit, market } = params;
+  const stopLossPercent = params.stopLossPercent ?? DEFAULT_STOP_LOSS_PERCENT;
+  const stopLossPrice = Math.round(price * (1 - stopLossPercent) * 100) / 100;
+  const riskPerShare = price - stopLossPrice;
+
+  if (riskPerShare <= 0 || riskAmount <= 0) {
+    return { stopLossPrice, riskPerShare, suggestedQuantity: 0, suggestedShares: 0, actualRiskAmount: 0 };
+  }
+
+  if (market === 'TW' && unit === 'LOTS') {
+    const suggestedQuantity = Math.floor(riskAmount / riskPerShare / SHARES_PER_LOT);
+    const suggestedShares = suggestedQuantity * SHARES_PER_LOT;
+    return {
+      stopLossPrice,
+      riskPerShare,
+      suggestedQuantity,
+      suggestedShares,
+      actualRiskAmount: suggestedShares * riskPerShare,
+    };
+  }
+
+  const suggestedShares = Math.floor(riskAmount / riskPerShare);
+  return {
+    stopLossPrice,
+    riskPerShare,
+    suggestedQuantity: suggestedShares,
+    suggestedShares,
+    actualRiskAmount: suggestedShares * riskPerShare,
+  };
 }
 

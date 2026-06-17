@@ -109,7 +109,8 @@ model Position {
   totalTax          Float        @default(0) // 總交易稅
   
   notes             String?      // 備註（可重複編輯）
-  
+  setupType         String?      // 進場訊號標籤
+
   trades            Trade[]
   
   createdAt         DateTime     @default(now())

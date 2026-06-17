@@ -3,6 +3,14 @@
 import { useState } from 'react';
 import type { Position, StockPrice, TrailingStopResult } from '@/lib/types';
 import { calculateTrailingStop, calculateUnrealizedPnL } from '@/lib/types';
+import { DEFAULT_STOP_LOSS_PERCENT } from '@/lib/tradeCalculations';
+
+// 趨勢排列圖示與顏色
+const TREND_CONFIG: Record<'多頭排列' | '空頭排列' | '盤整', { icon: string; color: string }> = {
+  '多頭排列': { icon: '🟢', color: 'bg-green-900/50 text-green-400' },
+  '空頭排列': { icon: '🔴', color: 'bg-red-900/50 text-red-400' },
+  '盤整': { icon: '🟡', color: 'bg-yellow-900/50 text-yellow-400' },
+};
 
 interface PositionsTableProps {
   positions: Position[];
@@ -10,9 +18,11 @@ interface PositionsTableProps {
   onMessage?: (type: 'success' | 'error', text: string) => void;
   currencySuffix?: string;
   onPositionStopLossUpdate?: (id: string, stopLossPrice: number) => void;
+  activeMarket?: 'TW' | 'US';
 }
 
-export default function PositionsTable({ positions, initialCapital = 100000, onMessage, currencySuffix = '元', onPositionStopLossUpdate }: PositionsTableProps) {
+export default function PositionsTable({ positions, initialCapital = 100000, onMessage, currencySuffix = '元', onPositionStopLossUpdate, activeMarket = 'TW' }: PositionsTableProps) {
+  const benchmarkCode = activeMarket === 'US' ? 'SPY' : '0050';
   const [stockPrices, setStockPrices] = useState<Record<string, StockPrice>>({});
   const [fetchingPrices, setFetchingPrices] = useState(false);
   const [pricesFetchedAt, setPricesFetchedAt] = useState<string | null>(null);
@@ -34,7 +44,7 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
 
     try {
       setFetchingPrices(true);
-      const stockCodes = openPositions.map(p => p.stockCode).join(',');
+      const stockCodes = [...new Set([...openPositions.map(p => p.stockCode), benchmarkCode])].join(',');
       const response = await fetch(`/api/stock-price?codes=${stockCodes}`);
 
       if (!response.ok) {
@@ -60,7 +70,7 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
 
           const posX = position as PositionWithTrades;
           const avgEntry = effectiveAvgEntryPrice(posX);
-          const originalStop = position.stopLossPrice ?? Math.round(avgEntry * 0.92 * 100) / 100;
+          const originalStop = position.stopLossPrice ?? Math.round(avgEntry * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
 
           const trailing = calculateTrailingStop(avgEntry, closingPrice, originalStop);
           if (!trailing || !trailing.isActivated) return;
@@ -137,6 +147,11 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
           </button>
         </div>
       </div>
+
+      {/* 大盤趨勢濾網 */}
+      {stockPrices[benchmarkCode] && (
+        <MarketRegimeCard benchmarkCode={benchmarkCode} priceData={stockPrices[benchmarkCode]!} />
+      )}
 
       {/* 持倉總覽 - 顯眼的佔比顯示 */}
       <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
@@ -215,6 +230,7 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
               <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">成本價</th>
               <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">今日收盤</th>
               <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">漲跌</th>
+              <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">RS 相對強度</th>
               <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">未實現損益</th>
               <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">停損價</th>
               <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">狀態</th>
@@ -276,8 +292,8 @@ function PositionRow({ position, priceData, initialCapital, currencySuffix = '�
   const closingPrice = priceData?.closingPrice;
   const change = priceData?.change;
   
-  const originalStopLoss = position.stopLossPrice || 
-    Math.round(avgEntry * 0.92 * 100) / 100;
+  const originalStopLoss = position.stopLossPrice ||
+    Math.round(avgEntry * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
   
   const trailingStop = calculateTrailingStop(
     avgEntry,
@@ -347,6 +363,12 @@ function PositionRow({ position, priceData, initialCapital, currencySuffix = '�
             </span>
           </div>
         )}
+        {/* 均線趨勢排列 */}
+        {priceData?.trendAlignment && (
+          <div className="mt-1 flex items-center gap-1">
+            <TrendBadge trendAlignment={priceData.trendAlignment} ma20={priceData.ma20} ma50={priceData.ma50} ma200={priceData.ma200} />
+          </div>
+        )}
       </td>
 
       {/* 股數 */}
@@ -367,6 +389,11 @@ function PositionRow({ position, priceData, initialCapital, currencySuffix = '�
       {/* 漲跌 */}
       <td className="text-right py-3 px-4">
         <ChangeCell change={change} />
+      </td>
+
+      {/* RS 相對強度 */}
+      <td className="text-right py-3 px-4">
+        <RSCell rsValue={priceData?.rsValue} rsLabel={priceData?.rsLabel} />
       </td>
 
       {/* 未實現損益 */}
@@ -426,6 +453,59 @@ function ClosingPriceCell({ closingPrice, priceData, currencySuffix = '元' }: {
   }
   
   return <span className="text-gray-500 text-sm">--</span>;
+}
+
+// 均線趨勢排列 badge
+function TrendBadge({ trendAlignment, ma20, ma50, ma200 }: {
+  trendAlignment: '多頭排列' | '空頭排列' | '盤整';
+  ma20?: number | null;
+  ma50?: number | null;
+  ma200?: number | null;
+}) {
+  const config = TREND_CONFIG[trendAlignment];
+  const fmt = (v?: number | null) => (v != null ? v.toFixed(2) : '--');
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${config.color}`}
+      title={`MA20: ${fmt(ma20)} / MA50: ${fmt(ma50)} / MA200: ${fmt(ma200)}`}
+    >
+      {config.icon} {trendAlignment}
+    </span>
+  );
+}
+
+// RS 相對強度欄位
+function RSCell({ rsValue, rsLabel }: { rsValue?: number | null; rsLabel?: '強於大盤' | '弱於大盤' | null }) {
+  if (rsValue == null || !rsLabel) {
+    return <span className="text-gray-500 text-sm">--</span>;
+  }
+  const isStrong = rsLabel === '強於大盤';
+  return (
+    <div className={isStrong ? 'text-red-400' : 'text-green-400'}>
+      <div className="font-medium">{rsValue >= 0 ? '+' : ''}{rsValue.toFixed(1)}%</div>
+      <div className="text-xs">{rsLabel}</div>
+    </div>
+  );
+}
+
+// 大盤趨勢濾網卡片
+function MarketRegimeCard({ benchmarkCode, priceData }: { benchmarkCode: string; priceData: StockPrice }) {
+  const { closingPrice, change, trendAlignment, ma20, ma50, ma200 } = priceData;
+  return (
+    <div className="mb-4 p-3 bg-gray-800/50 rounded-xl border border-gray-700 flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-gray-400">📡 大盤狀態</span>
+        <span className="font-semibold text-gray-200">{benchmarkCode}</span>
+        {closingPrice != null && (
+          <span className="text-gray-200">{closingPrice.toLocaleString()}</span>
+        )}
+        <ChangeCell change={change} />
+      </div>
+      {trendAlignment && (
+        <TrendBadge trendAlignment={trendAlignment} ma20={ma20} ma50={ma50} ma200={ma200} />
+      )}
+    </div>
+  );
 }
 
 // 漲跌欄位

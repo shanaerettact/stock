@@ -315,6 +315,7 @@ export default function HomePage() {
               onMessage={showMessage}
               currencySuffix={activeMarket === 'US' ? '美元' : '元'}
               onPositionStopLossUpdate={handlePositionStopLossUpdate}
+              activeMarket={activeMarket}
             />
 
             {/* 最近交易記錄 */}

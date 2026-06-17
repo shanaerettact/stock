@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
       positionId,
       securityType = 'STOCK',
       isDayTrade: rawDayTrade = false,
+      setupType,
     } = body;
 
     const market = body.market === 'US' ? 'US' : 'TW';
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest) {
             plannedStopLoss: plannedStopLoss ? parseFloat(plannedStopLoss) : null,
             totalInvested: calculation.totalCost,
             totalCommission: calculation.commission,
+            setupType: setupType || null,
           },
         });
         finalPositionId = position.id;

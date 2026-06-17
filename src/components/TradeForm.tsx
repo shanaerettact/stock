@@ -6,8 +6,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { calculateTrade, type TradeUnit } from '@/lib/tradeCalculations';
+import { calculateTrade, calculatePositionSize, DEFAULT_STOP_LOSS_PERCENT, type TradeUnit } from '@/lib/tradeCalculations';
 import { getStockNameByCode, getStockCodeByName } from '@/data/stockList';
+import { SETUP_TYPES } from '@/lib/types';
 
 // ===== 型別定義 =====
 
@@ -28,7 +29,10 @@ export interface TradeFormData {
   // 風險管理（可選）
   stopLossPrice: string; // 停損價格
   plannedStopLoss: string;
-  
+
+  // 進場訊號標籤（僅新部位適用）
+  setupType?: string;
+
   // 關聯部位（可選，用於加碼或平倉）
   positionId?: string;
 }
@@ -83,12 +87,17 @@ export default function TradeForm({
     isDayTrade: initialData?.isDayTrade || false,
     stopLossPrice: initialData?.stopLossPrice || '',
     plannedStopLoss: initialData?.plannedStopLoss || '',
+    setupType: initialData?.setupType || '',
     positionId: initialData?.positionId || undefined,
   });
-  
+
   const [errors, setErrors] = useState<TradeFormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [preview, setPreview] = useState<ReturnType<typeof calculateTrade> | null>(null);
+
+  // 部位試算（風險管理）
+  const [sizingStopPercentInput, setSizingStopPercentInput] = useState<string>(String(DEFAULT_STOP_LOSS_PERCENT * 100));
+  const [sizingRiskAmountInput, setSizingRiskAmountInput] = useState<string>('');
   
   // 當 initialData 改變時，更新表單資料（用於編輯模式）
   useEffect(() => {
@@ -105,6 +114,7 @@ export default function TradeForm({
         isDayTrade: initialData.isDayTrade || false,
         stopLossPrice: initialData.stopLossPrice || '',
         plannedStopLoss: initialData.plannedStopLoss || '',
+        setupType: initialData.setupType || '',
         positionId: initialData.positionId || undefined,
       });
       setErrors({});
@@ -176,7 +186,7 @@ export default function TradeForm({
       });
       setPreview(calculation);
       
-      const autoStopLossPrice = Math.round(price * 0.92 * 100) / 100;
+      const autoStopLossPrice = Math.round(price * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
       const totalShares = isUS ? quantity : (formData.unit === 'LOTS' ? quantity * 1000 : quantity);
       const stopLossAmount = Math.round((price - autoStopLossPrice) * totalShares);
       
@@ -189,6 +199,11 @@ export default function TradeForm({
       setPreview(null);
     }
   }, [formData.price, formData.quantity, formData.unit, formData.tradeType, formData.securityType, formData.isDayTrade, market, isUS]);
+
+  // 部位試算：可承受風險金額預設同步「預計停損損失」（依成交價格與數量算出的 8% 停損金額）
+  useEffect(() => {
+    setSizingRiskAmountInput(formData.plannedStopLoss || '');
+  }, [formData.plannedStopLoss]);
 
   // 表單驗證
   const validateForm = (): boolean => {
@@ -300,7 +315,24 @@ export default function TradeForm({
       setIsSubmitting(false);
     }
   };
-  
+
+  // 部位試算結果（依目前價格、停損比例、可承受風險金額計算建議數量）
+  const sizingPrice = parseFloat(formData.price);
+  const sizingStopPercent = parseFloat(sizingStopPercentInput) / 100;
+  const sizingRiskAmount = parseFloat(sizingRiskAmountInput);
+  const positionSizeResult =
+    !isNaN(sizingPrice) && sizingPrice > 0 &&
+    !isNaN(sizingStopPercent) && sizingStopPercent > 0 &&
+    !isNaN(sizingRiskAmount) && sizingRiskAmount > 0
+      ? calculatePositionSize({
+          price: sizingPrice,
+          riskAmount: sizingRiskAmount,
+          stopLossPercent: sizingStopPercent,
+          unit: formData.unit,
+          market,
+        })
+      : null;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl mx-auto p-6 bg-gray-900 rounded-lg shadow-md border border-gray-800">
       {!embedded && (
@@ -390,7 +422,26 @@ export default function TradeForm({
           )}
         </div>
       </div>
-      
+
+      {/* 進場訊號類型（僅新部位適用） */}
+      {formData.tradeType === 'BUY' && !formData.positionId && (
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            進場訊號類型
+          </label>
+          <select
+            value={formData.setupType || ''}
+            onChange={(e) => handleChange('setupType', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+          >
+            <option value="">不標記</option>
+            {SETUP_TYPES.map((type) => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* 交易日期 */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -487,7 +538,83 @@ export default function TradeForm({
           )}
         </div>
       </div>
-      
+
+      {/* 部位試算（風險管理） */}
+      {formData.tradeType === 'BUY' && formData.price && (
+        <div className="bg-gray-800 border border-gray-700 rounded-md p-4">
+          <h3 className="font-semibold text-blue-400 mb-3">📐 部位試算（風險管理）</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                停損比例 (%)
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={sizingStopPercentInput}
+                onChange={(e) => setSizingStopPercentInput(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                可承受風險金額（{priceSuffix}）
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={sizingRiskAmountInput}
+                onChange={(e) => setSizingRiskAmountInput(e.target.value)}
+                onWheel={(e) => e.currentTarget.blur()}
+                placeholder="例如：5000"
+                className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+              />
+            </div>
+          </div>
+
+          {positionSizeResult ? (
+            <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+              <div className="text-gray-400">建議停損價：</div>
+              <div className="font-semibold text-right text-red-400">
+                {positionSizeResult.stopLossPrice.toLocaleString('zh-TW')} {priceSuffix}
+              </div>
+              <div className="text-gray-400">每股風險：</div>
+              <div className="font-semibold text-right text-orange-400">
+                {positionSizeResult.riskPerShare.toLocaleString('zh-TW')} {priceSuffix}
+              </div>
+              <div className="text-gray-400">建議買入數量：</div>
+              <div className="font-semibold text-right text-blue-400">
+                {positionSizeResult.suggestedQuantity.toLocaleString('zh-TW')} {!isUS && formData.unit === 'LOTS' ? '張' : '股'}
+              </div>
+              <div className="text-gray-400">實際風險金額：</div>
+              <div className="font-semibold text-right text-gray-200">
+                {Math.round(positionSizeResult.actualRiskAmount).toLocaleString('zh-TW')} {priceSuffix}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 mb-3">
+              請輸入停損比例與可承受風險金額，系統將自動試算建議買入數量。
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={() => positionSizeResult && handleChange('quantity', String(positionSizeResult.suggestedQuantity))}
+            disabled={!positionSizeResult || positionSizeResult.suggestedQuantity <= 0}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-md transition-colors"
+          >
+            套用建議數量
+          </button>
+          {positionSizeResult && positionSizeResult.suggestedQuantity <= 0 && (
+            <p className="mt-2 text-xs text-yellow-400">
+              ⚠️ 風險金額不足以買進最小單位，請提高風險金額或調整停損比例
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 標的類型與當沖設定 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -603,7 +730,7 @@ export default function TradeForm({
                 
                 <div className="text-gray-400">預計停損損失：</div>
                 <div className="font-semibold text-right text-orange-400">
-                  {parseFloat(formData.plannedStopLoss || '0').toLocaleString('zh-TW')} {priceSuffix}（約當 8%）
+                  {parseFloat(formData.plannedStopLoss || '0').toLocaleString('zh-TW')} {priceSuffix}（約當 {(DEFAULT_STOP_LOSS_PERCENT * 100).toFixed(0)}%）
                 </div>
               </>
             )}

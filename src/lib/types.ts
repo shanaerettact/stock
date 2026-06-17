@@ -23,6 +23,10 @@ export interface Trade {
   createdAt: string;
 }
 
+// ===== 進場訊號標籤 =====
+
+export const SETUP_TYPES = ['52週新高突破', '回測支撐/均線', '箱型突破', '強勢股輪動', '其他'] as const;
+
 // ===== 部位相關 =====
 
 export interface Position {
@@ -44,6 +48,14 @@ export interface Position {
   exitDate?: string | Date | null;   // 平倉日期
   avgExitPrice?: number | null;      // 平均賣出價
   notes?: string | null;             // 備註
+  setupType?: string | null;         // 進場訊號標籤
+  trades?: Array<{
+    tradeType: string;
+    price: number;
+    quantity: number;
+    unit: string;
+    tradeDate: string;
+  }>;
 }
 
 // ===== 股價相關 =====
@@ -63,6 +75,15 @@ export interface StockPrice {
   avg50DayVolume?: number | null; // 50 日平均交易量
   volumeRatio?: number | null;    // 今日交易量 / 50 日平均交易量
   isVolumeHigh?: boolean;         // 今日交易量是否大於 50 日平均的 50%
+  // 均線趨勢相關
+  ma20?: number | null;
+  ma50?: number | null;
+  ma200?: number | null;
+  trendAlignment?: '多頭排列' | '空頭排列' | '盤整' | null;
+  // 相對強度（vs 大盤）
+  rsValue?: number | null;
+  rsLabel?: '強於大盤' | '弱於大盤' | null;
+  benchmarkCode?: string | null;
 }
 
 // ===== 追蹤停損相關 =====

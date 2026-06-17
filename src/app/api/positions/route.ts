@@ -66,6 +66,9 @@ export async function PATCH(request: NextRequest) {
     if ('stopLossPrice' in body) {
       updateData.stopLossPrice = typeof body.stopLossPrice === 'number' ? body.stopLossPrice : null;
     }
+    if ('setupType' in body) {
+      updateData.setupType = typeof body.setupType === 'string' && body.setupType ? body.setupType : null;
+    }
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: '沒有可更新的欄位' }, { status: 400 });

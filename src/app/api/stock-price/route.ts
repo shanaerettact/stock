@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { calculateSMA, getTrendAlignment, calculateRelativeStrength, type TrendAlignment } from '@/lib/indicators';
 
 // TWSE 上市股票資料格式
 interface TWSEStockData {
@@ -54,6 +55,15 @@ export interface StockPriceResult {
   avg50DayVolume?: number | null; // 50 日平均交易量
   volumeRatio?: number | null;    // 今日交易量 / 50 日平均交易量
   isVolumeHigh?: boolean;         // 今日交易量是否大於 50 日平均的 50%
+  // 均線趨勢相關
+  ma20?: number | null;
+  ma50?: number | null;
+  ma200?: number | null;
+  trendAlignment?: TrendAlignment | null;
+  // 相對強度（vs 大盤）
+  rsValue?: number | null;
+  rsLabel?: '強於大盤' | '弱於大盤' | null;
+  benchmarkCode?: string | null;
 }
 
 // 解析價格字串
@@ -376,17 +386,36 @@ async function fetchHistory(
   return { history: [], sourcesTried };
 }
 
-// 計算 52 周新高和 50 日平均交易量
+// 取得 52 周日期範圍（today - 365 天 ~ today）
+function get52WeekRange(): { startDateStr: string; endDateStr: string } {
+  const endDate = new Date();
+  const startDate52Weeks = new Date(endDate);
+  startDate52Weeks.setDate(startDate52Weeks.getDate() - 365);
+  return {
+    startDateStr: startDate52Weeks.toISOString().split('T')[0] ?? '',
+    endDateStr: endDate.toISOString().split('T')[0] ?? '',
+  };
+}
+
+// 計算 52 周新高、50 日平均交易量、均線趨勢與相對強度
 async function calculateAdvancedMetrics(
   stockCode: string,
   todayClosingPrice: number | null,
-  todayVolume: number | null
+  todayVolume: number | null,
+  benchmarkCloses: number[],
+  benchmarkCode: string
 ): Promise<{
   is52WeekHigh: boolean;
   week52High: number | null;
   avg50DayVolume: number | null;
   volumeRatio: number | null;
   isVolumeHigh: boolean;
+  ma20: number | null;
+  ma50: number | null;
+  ma200: number | null;
+  trendAlignment: TrendAlignment | null;
+  rsValue: number | null;
+  rsLabel: '強於大盤' | '弱於大盤' | null;
 }> {
   if (todayClosingPrice === null) {
     return {
@@ -395,18 +424,19 @@ async function calculateAdvancedMetrics(
       avg50DayVolume: null,
       volumeRatio: null,
       isVolumeHigh: false,
+      ma20: null,
+      ma50: null,
+      ma200: null,
+      trendAlignment: null,
+      rsValue: null,
+      rsLabel: null,
     };
   }
 
   // 計算日期範圍（52 周約 365 天，50 日約 70 天，考慮交易日）
-  const endDate = new Date();
-  const startDate52Weeks = new Date(endDate);
-  startDate52Weeks.setDate(startDate52Weeks.getDate() - 365);
-  const startDate50Days = new Date(endDate);
+  const { startDateStr: startDate52WeeksStr, endDateStr } = get52WeekRange();
+  const startDate50Days = new Date();
   startDate50Days.setDate(startDate50Days.getDate() - 70);
-
-  const endDateStr = endDate.toISOString().split('T')[0] ?? '';
-  const startDate52WeeksStr = startDate52Weeks.toISOString().split('T')[0] ?? '';
   const startDate50DaysStr = startDate50Days.toISOString().split('T')[0] ?? '';
 
   // 取得 52 周歷史資料（證交所/櫃買/Yahoo）
@@ -444,12 +474,39 @@ async function calculateAdvancedMetrics(
     isVolumeHigh = volumeRatio >= 1.5;
   }
 
+  // 計算 MA20/50/200 與趨勢排列（以歷史收盤序列 + 今日收盤計算）
+  const closesForMA = history52Weeks.map(d => d.close);
+  if (closesForMA.length === 0 || closesForMA[closesForMA.length - 1] !== todayClosingPrice) {
+    closesForMA.push(todayClosingPrice);
+  }
+  const ma20 = calculateSMA(closesForMA, 20).at(-1) ?? null;
+  const ma50 = calculateSMA(closesForMA, 50).at(-1) ?? null;
+  const ma200 = calculateSMA(closesForMA, 200).at(-1) ?? null;
+  const trendAlignment = getTrendAlignment(todayClosingPrice, ma20, ma50, ma200);
+
+  // 計算相對強度（vs 大盤基準，自身即為基準時略過）
+  let rsValue: number | null = null;
+  let rsLabel: '強於大盤' | '弱於大盤' | null = null;
+  if (stockCode.toUpperCase() !== benchmarkCode.toUpperCase() && benchmarkCloses.length > 0) {
+    const rs = calculateRelativeStrength(closesForMA, benchmarkCloses, 60);
+    if (rs) {
+      rsValue = rs.rsValue;
+      rsLabel = rs.rsLabel;
+    }
+  }
+
   return {
     is52WeekHigh,
     week52High,
     avg50DayVolume,
     volumeRatio,
     isVolumeHigh,
+    ma20,
+    ma50,
+    ma200,
+    trendAlignment,
+    rsValue,
+    rsLabel,
   };
 }
 
@@ -467,20 +524,39 @@ export async function GET(request: NextRequest) {
       const code = codeParam.trim();
       const marketParam = searchParams.get('market');
       const market = marketParam === '上櫃' || marketParam === '上市' ? marketParam : null;
-      const { history, sourcesTried } = await fetchHistory(code, startDate, endDate, market);
+
+      // 往前延伸約 300 天，用於計算 MA20/50/200（避免請求區間開頭的均線值為 null）
+      const extendedStartDateObj = new Date(startDate);
+      extendedStartDateObj.setDate(extendedStartDateObj.getDate() - 300);
+      const extendedStartDate = extendedStartDateObj.toISOString().split('T')[0] ?? startDate;
+
+      const { history, sourcesTried } = await fetchHistory(code, extendedStartDate, endDate, market);
       if (history.length === 0) {
         console.warn(`[歷史日線無資料] 代碼=${code} 市場=${market ?? '未知'} 已嘗試=${sourcesTried.join(',')}`);
       }
-      return NextResponse.json({
-        success: true,
-        data: history.map(d => ({
+
+      const closes = history.map(d => d.close);
+      const ma20Series = calculateSMA(closes, 20);
+      const ma50Series = calculateSMA(closes, 50);
+      const ma200Series = calculateSMA(closes, 200);
+
+      const data = history
+        .map((d, i) => ({
           date: d.date,
           open: d.open,
           high: d.high,
           low: d.low,
           close: d.close,
           volume: d.volume ?? null,
-        })),
+          ma20: ma20Series[i] ?? null,
+          ma50: ma50Series[i] ?? null,
+          ma200: ma200Series[i] ?? null,
+        }))
+        .filter(d => d.date >= startDate);
+
+      return NextResponse.json({
+        success: true,
+        data,
         ...(history.length === 0 && { debug: { stockCode: code, market: market ?? '未知', sourcesTried } }),
       });
     }
@@ -496,6 +572,20 @@ export async function GET(request: NextRequest) {
     const stockCodes = codesParam.split(',').map(code => code.trim());
 
     const needsTwQuotes = stockCodes.some((code) => !isUsTickerSymbol(code));
+    const needsUsQuotes = stockCodes.some((code) => isUsTickerSymbol(code));
+
+    // 大盤基準歷史（台股：0050；美股：SPY），每批請求各只抓一次，供均線趨勢與相對強度計算
+    const { startDateStr: bench52wStart, endDateStr: bench52wEnd } = get52WeekRange();
+    const [twBenchmarkHistory, usBenchmarkHistory] = await Promise.all([
+      needsTwQuotes
+        ? fetchHistory('0050', bench52wStart, bench52wEnd, '上市').then(r => r.history)
+        : Promise.resolve([]),
+      needsUsQuotes
+        ? fetchYahooUsHistory('SPY', bench52wStart, bench52wEnd)
+        : Promise.resolve([]),
+    ]);
+    const twBenchmarkCloses = twBenchmarkHistory.map(d => d.close);
+    const usBenchmarkCloses = usBenchmarkHistory.map(d => d.close);
 
     let twseData: TWSEStockData[] = [];
     let tpexData: TPEXStockData[] = [];
@@ -617,10 +707,15 @@ export async function GET(request: NextRequest) {
         }
 
         try {
+          const isUs = isUsTickerSymbol(result.stockCode);
+          const benchmarkCloses = isUs ? usBenchmarkCloses : twBenchmarkCloses;
+          const benchmarkCode = isUs ? 'SPY' : '0050';
           const metrics = await calculateAdvancedMetrics(
             result.stockCode,
             result.closingPrice,
-            result.tradeVolume
+            result.tradeVolume,
+            benchmarkCloses,
+            benchmarkCode
           );
 
           return {
@@ -631,6 +726,13 @@ export async function GET(request: NextRequest) {
             avg50DayVolume: metrics.avg50DayVolume,
             volumeRatio: metrics.volumeRatio,
             isVolumeHigh: metrics.isVolumeHigh,
+            ma20: metrics.ma20,
+            ma50: metrics.ma50,
+            ma200: metrics.ma200,
+            trendAlignment: metrics.trendAlignment,
+            rsValue: metrics.rsValue,
+            rsLabel: metrics.rsLabel,
+            benchmarkCode,
           };
         } catch (error) {
           console.error(`計算進階指標失敗 (${result.stockCode}):`, error);

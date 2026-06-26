@@ -31,8 +31,8 @@ export function validateStockCodeForMarket(code: string, market: 'TW' | 'US'): V
     }
     return { isValid: true };
   }
-  if (!/^\d{4,6}$/.test(c)) {
-    return { isValid: false, error: '股票代號格式錯誤（應為 4-6 位數字）' };
+  if (!/^[A-Za-z0-9]{2,10}$/.test(c)) {
+    return { isValid: false, error: '股票代號格式錯誤（2-10 位英數字）' };
   }
   return { isValid: true };
 }

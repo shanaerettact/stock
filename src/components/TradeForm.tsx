@@ -216,8 +216,8 @@ export default function TradeForm({
       if (!/^[A-Z]{1,10}(\.[A-Z]{1,2})?$/i.test(formData.stockCode.trim())) {
         newErrors.stockCode = '美股代號格式錯誤（例如 AAPL、BRK.B）';
       }
-    } else if (!/^\d{4,6}$/.test(formData.stockCode)) {
-      newErrors.stockCode = '股票代號格式錯誤（應為 4-6 位數字）';
+    } else if (!/^[A-Za-z0-9]{2,10}$/.test(formData.stockCode)) {
+      newErrors.stockCode = '股票代號格式錯誤（2-10 位英數字）';
     }
     
     // 價格驗證

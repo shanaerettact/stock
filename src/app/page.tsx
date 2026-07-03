@@ -530,18 +530,30 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
   currencySuffix?: string;
 }) {
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const itemsPerPage = 10;
-  const totalPages = Math.ceil(trades.length / itemsPerPage);
-  
+
+  // 依關鍵字篩選交易記錄（股票代號或名稱）
+  const filteredTrades = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    if (!keyword) return trades;
+    return trades.filter((trade) =>
+      trade.stockCode.toLowerCase().includes(keyword) ||
+      (trade.stockName ?? '').toLowerCase().includes(keyword)
+    );
+  }, [trades, searchKeyword]);
+
+  const totalPages = Math.ceil(filteredTrades.length / itemsPerPage);
+
   // 計算當前頁的資料範圍
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const currentTrades = trades.slice(startIndex, endIndex);
-  
-  // 當交易記錄變更時，重置到第一頁
+  const currentTrades = filteredTrades.slice(startIndex, endIndex);
+
+  // 當交易記錄或搜尋關鍵字變更時，重置到第一頁
   useEffect(() => {
     setCurrentPage(1);
-  }, [trades.length]);
+  }, [trades.length, searchKeyword]);
   
   // 生成頁碼按鈕
   const getPageNumbers = () => {
@@ -586,7 +598,29 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
   
   return (
     <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
-      <h2 className="text-2xl font-bold text-gray-100 mb-4">📝 最近交易記錄</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <h2 className="text-2xl font-bold text-gray-100">📝 最近交易記錄</h2>
+        <div className="relative w-full sm:w-64">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">🔍</span>
+          <input
+            type="text"
+            value={searchKeyword}
+            onChange={(e) => setSearchKeyword(e.target.value)}
+            placeholder="搜尋股票代號或名稱"
+            className="w-full pl-9 pr-8 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600"
+          />
+          {searchKeyword && (
+            <button
+              type="button"
+              onClick={() => setSearchKeyword('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+              aria-label="清除搜尋"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
@@ -647,7 +681,7 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
             ) : (
               <tr>
                 <td colSpan={7} className="py-8 text-center text-gray-500">
-                  尚無交易記錄
+                  {searchKeyword ? '查無符合的交易記錄' : '尚無交易記錄'}
                 </td>
               </tr>
             )}
@@ -659,7 +693,7 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
       {totalPages > 1 && (
         <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-sm text-gray-400">
-            顯示第 {startIndex + 1} - {Math.min(endIndex, trades.length)} 筆，共 {trades.length} 筆交易記錄
+            顯示第 {startIndex + 1} - {Math.min(endIndex, filteredTrades.length)} 筆，共 {filteredTrades.length} 筆交易記錄
           </div>
           
           <div className="flex items-center gap-2">

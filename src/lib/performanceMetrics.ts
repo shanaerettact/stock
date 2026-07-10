@@ -13,6 +13,23 @@ export interface ClosedPosition {
   exitDate: Date;
 }
 
+/** 將 API 回傳的已平倉 Position 轉為績效計算用的 ClosedPosition */
+export function toClosedPosition(p: {
+  totalPnL: number | null;
+  returnRate: number | null;
+  rValue: number | null;
+  holdingDays?: number | null;
+  exitDate?: string | Date | null;
+}): ClosedPosition {
+  return {
+    totalPnL: p.totalPnL ?? 0,
+    returnRate: p.returnRate ?? 0,
+    rValue: p.rValue,
+    holdingDays: p.holdingDays ?? 0,
+    exitDate: p.exitDate ? new Date(p.exitDate) : new Date(),
+  };
+}
+
 export interface PerformanceMetrics {
   // 基本統計
   totalTrades: number;

@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createChart, createSeriesMarkers, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, BarChart, Bar, Cell,
+} from 'recharts';
 import { SETUP_TYPES, type Trade, type Position } from '@/lib/types';
 import { getStockMarketByCode } from '@/data/stockList';
 import {
-  type ClosedPosition,
   type PerformanceMetrics,
+  toClosedPosition,
   getPyramidType,
   analyzeBySetupType,
   analyzePyramiding,
@@ -24,14 +27,154 @@ const MA_SERIES_CONFIG: { key: 'ma20' | 'ma50' | 'ma200'; color: string; label: 
   { key: 'ma200', color: '#a855f7', label: 'MA200' },
 ];
 
-function toClosedPosition(p: Position & { holdingDays?: number | null }): ClosedPosition {
-  return {
-    totalPnL: p.totalPnL ?? 0,
-    returnRate: p.returnRate ?? 0,
-    rValue: p.rValue,
-    holdingDays: p.holdingDays ?? 0,
-    exitDate: p.exitDate ? new Date(p.exitDate) : new Date(),
-  };
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: '#111827',
+  border: '1px solid #374151',
+  borderRadius: 8,
+  color: '#e5e7eb',
+  fontSize: 12,
+};
+
+// 權益曲線：依平倉日排序的累積已實現損益，並標示最大回撤
+function EquityCurveChart({ positions }: { positions: Position[] }) {
+  const { data, maxDD } = useMemo(() => {
+    const closed = positions
+      .filter(p => p.status === 'CLOSED')
+      .slice()
+      .sort((a, b) => {
+        const ad = a.exitDate ? new Date(a.exitDate).getTime() : 0;
+        const bd = b.exitDate ? new Date(b.exitDate).getTime() : 0;
+        return ad - bd;
+      });
+    let cum = 0;
+    let peak = 0;
+    let worst = 0;
+    const data = closed.map((p, i) => {
+      cum += p.totalPnL ?? 0;
+      peak = Math.max(peak, cum);
+      const dd = cum - peak;
+      if (dd < worst) worst = dd;
+      return {
+        label: p.exitDate ? new Date(p.exitDate).toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' }) : String(i + 1),
+        equity: Math.round(cum),
+      };
+    });
+    return { data, maxDD: Math.round(worst) };
+  }, [positions]);
+
+  if (data.length < 2) {
+    return <div className="text-sm text-gray-500 py-8 text-center">平倉筆數不足，無法繪製權益曲線</div>;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="font-semibold text-gray-200 text-sm">📈 權益曲線（累積已實現損益）</h4>
+        <span className="text-xs text-green-400">最大回撤 {maxDD.toLocaleString()}</span>
+      </div>
+      <div style={{ width: '100%', height: 210 }}>
+        <ResponsiveContainer>
+          <AreaChart data={data} margin={{ top: 5, right: 8, left: -8, bottom: 0 }}>
+            <defs>
+              <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: '#9ca3af', fontSize: 11 }} minTickGap={24} />
+            <YAxis tick={{ fill: '#9ca3af', fontSize: 11 }} width={52} tickFormatter={(v) => (v as number).toLocaleString()} />
+            <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(v) => [(v as number).toLocaleString(), '累積損益']} labelFormatter={(l) => `平倉 ${l}`} />
+            <ReferenceLine y={0} stroke="#4b5563" />
+            <Area type="monotone" dataKey="equity" stroke="#3b82f6" strokeWidth={2} fill="url(#eqFill)" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+// R 倍數分佈（沿用台股慣例：正 R 紅、負 R 綠）
+function RDistributionChart({ positions }: { positions: Position[] }) {
+  const { bins, total } = useMemo(() => {
+    const rs = positions
+      .filter(p => p.status === 'CLOSED')
+      .map(p => p.rValue)
+      .filter((r): r is number => r != null && Number.isFinite(r));
+    const edges: { name: string; test: (r: number) => boolean; color: string }[] = [
+      { name: '≤-2R', test: (r) => r <= -2, color: '#15803d' },
+      { name: '-2~-1R', test: (r) => r > -2 && r <= -1, color: '#22c55e' },
+      { name: '-1~0R', test: (r) => r > -1 && r < 0, color: '#4ade80' },
+      { name: '0~1R', test: (r) => r >= 0 && r < 1, color: '#f87171' },
+      { name: '1~2R', test: (r) => r >= 1 && r < 2, color: '#ef4444' },
+      { name: '2~3R', test: (r) => r >= 2 && r < 3, color: '#dc2626' },
+      { name: '≥3R', test: (r) => r >= 3, color: '#b91c1c' },
+    ];
+    const bins = edges.map(e => ({ name: e.name, count: rs.filter(e.test).length, color: e.color }));
+    return { bins, total: rs.length };
+  }, [positions]);
+
+  if (total === 0) {
+    return <div className="text-sm text-gray-500 py-8 text-center">尚無 R 值資料（需有停損金額的平倉部位）</div>;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="font-semibold text-gray-200 text-sm">🎲 R 倍數分佈</h4>
+        <span className="text-xs text-gray-500">{total} 筆平倉</span>
+      </div>
+      <div style={{ width: '100%', height: 190 }}>
+        <ResponsiveContainer>
+          <BarChart data={bins} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+            <XAxis dataKey="name" tick={{ fill: '#9ca3af', fontSize: 10 }} interval={0} />
+            <YAxis tick={{ fill: '#9ca3af', fontSize: 11 }} allowDecimals={false} width={28} />
+            <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} contentStyle={CHART_TOOLTIP_STYLE} formatter={(v) => [v, '筆數']} />
+            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+              {bins.map((b, i) => <Cell key={i} fill={b.color} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="text-[11px] text-gray-500 mt-1">趨勢交易靠右尾（少數 ≥2R 大贏家）貢獻主要獲利，理想分佈右側應有厚尾。</p>
+    </div>
+  );
+}
+
+// 進場指標快照（趨勢交易復盤：進場當下的 RS / 均線排列 / 距 52 週高 / 量比）
+function EntrySnapshot({ position }: { position: Position }) {
+  const { rsAtEntry, trendAtEntry, pctFrom52wHighAtEntry, volRatioAtEntry } = position;
+  const has = rsAtEntry != null || trendAtEntry != null || pctFrom52wHighAtEntry != null || volRatioAtEntry != null;
+  if (!has) {
+    return (
+      <div className="mt-1.5 text-xs text-gray-600 shrink-0">
+        進場條件：此部位建立前未記錄快照（之後新買進會自動擷取）
+      </div>
+    );
+  }
+  const chip = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium';
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 shrink-0">
+      <span className="text-xs text-gray-500">進場條件：</span>
+      {trendAtEntry && (
+        <span className={`${chip} ${trendAtEntry === '多頭排列' ? 'bg-red-900/40 text-red-300' : trendAtEntry === '空頭排列' ? 'bg-green-900/40 text-green-300' : 'bg-yellow-900/40 text-yellow-300'}`}>
+          {trendAtEntry}
+        </span>
+      )}
+      {rsAtEntry != null && (
+        <span className={`${chip} ${rsAtEntry >= 0 ? 'bg-red-900/30 text-red-300' : 'bg-green-900/30 text-green-300'}`}>
+          RS {rsAtEntry >= 0 ? '+' : ''}{rsAtEntry.toFixed(1)}%
+        </span>
+      )}
+      {pctFrom52wHighAtEntry != null && (
+        <span className={`${chip} bg-gray-800 text-gray-300`}>距52週高 {pctFrom52wHighAtEntry >= 0 ? '+' : ''}{pctFrom52wHighAtEntry.toFixed(1)}%</span>
+      )}
+      {volRatioAtEntry != null && (
+        <span className={`${chip} bg-gray-800 text-gray-300`}>量比 {volRatioAtEntry.toFixed(2)}x</span>
+      )}
+    </div>
+  );
 }
 
 interface DataModalProps {
@@ -84,6 +227,7 @@ export default function DataModal({
   const [chartData, setChartData] = useState<ChartCandle[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
+  const [chartSource, setChartSource] = useState<{ sourceUsed: string | null; isFallback: boolean } | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<ReturnType<typeof createChart> | null>(null);
   const [performanceDetailView, setPerformanceDetailView] = useState<'win' | 'loss' | null>(null);
@@ -100,6 +244,7 @@ export default function DataModal({
     setEditingSetupType(position.setupType ?? '');
     setChartError(null);
     setChartData([]);
+    setChartSource(null);
     setChartLoading(true);
     const entryDate = new Date(position.entryDate);
     const padStart = new Date(entryDate);
@@ -161,6 +306,10 @@ export default function DataModal({
         throw new Error('無有效的歷史資料');
       }
       setChartData(data);
+      setChartSource({
+        sourceUsed: typeof json.sourceUsed === 'string' ? json.sourceUsed : null,
+        isFallback: json.isFallbackSource === true,
+      });
     } catch (err) {
       setChartError(err instanceof Error ? err.message : '載入失敗');
     } finally {
@@ -171,6 +320,7 @@ export default function DataModal({
   const closeChart = useCallback(() => {
     setChartPosition(null);
     setChartData([]);
+    setChartSource(null);
     setChartError(null);
     setEditingNoteValue('');
     setEditingSetupType('');
@@ -600,6 +750,17 @@ export default function DataModal({
                 </div>
               </div>
             </div>
+
+            {/* 權益曲線 + R 倍數分佈 */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-gray-800/40 rounded-lg p-4 border border-gray-700">
+                <EquityCurveChart positions={performance.closedPositions} />
+              </div>
+              <div className="bg-gray-800/40 rounded-lg p-4 border border-gray-700">
+                <RDistributionChart positions={performance.closedPositions} />
+              </div>
+            </div>
+
             {performanceDetailView && (() => {
               const list = performanceDetailView === 'win'
                 ? performance.closedPositions.filter(p => (p.totalPnL || 0) > 0)
@@ -1397,22 +1558,39 @@ export default function DataModal({
     }
   };
 
+  const getSubtitle = () => {
+    const mk = activeMarket === 'US' ? '美股' : '台股';
+    switch (type) {
+      case 'trades': return `${mk} · 買賣明細與手續費統計`;
+      case 'performance': return `${mk} · 勝率、盈虧比與進場訊號分析`;
+      case 'funds': return `${mk} · 餘額、持倉佔比與資產核對`;
+      case 'positions': return `${mk} · 點列表可展開日線圖與進出場標註`;
+      case 'rvalue': return `${mk} · 風險報酬比與交易品質量化`;
+      case 'monthly': return `${mk} · 依月份彙整績效`;
+      default: return mk;
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
-        className="absolute inset-0 bg-black bg-opacity-70 transition-opacity"
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm modal-overlay-in"
         onClick={onClose}
       />
 
-      <div className="relative bg-gray-900 rounded-lg shadow-2xl max-w-3xl w-full h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] border border-gray-700 flex flex-col overflow-hidden">
-        <div className="sticky top-0 bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6 rounded-t-lg z-10 border-b border-gray-700">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold">{getTitle()}</h2>
+      <div className="modal-panel-in relative bg-gray-900 rounded-2xl shadow-2xl max-w-3xl w-full h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] border border-gray-700 flex flex-col overflow-hidden">
+        <div className="sticky top-0 bg-gray-900/95 backdrop-blur text-white px-6 py-4 z-10 border-b border-gray-800">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">{getTitle()}</h2>
+              <p className="text-xs text-gray-500 mt-0.5">{getSubtitle()}</p>
+            </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-200 transition-colors p-2"
+              aria-label="關閉"
+              className="text-gray-400 hover:text-gray-100 hover:bg-gray-800 transition-colors p-2 rounded-lg -mr-1"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -1423,17 +1601,28 @@ export default function DataModal({
           {renderContent()}
 
           {chartPosition && (
-            <div className="absolute inset-0 top-0 left-0 right-0 bottom-0 bg-gray-900 z-20 rounded-lg border border-gray-700 flex flex-col -m-6 p-6 min-h-0 overflow-y-auto">
+            <div className="modal-panel-in absolute inset-0 top-0 left-0 right-0 bottom-0 bg-gray-900 z-20 rounded-2xl border border-gray-700 flex flex-col -m-6 p-6 min-h-0 overflow-y-auto">
               <div className="flex justify-between items-center mb-3 shrink-0">
-                <h4 className="font-semibold text-gray-200">
+                <h4 className="font-semibold text-gray-200 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={closeChart}
+                    className="text-gray-400 hover:text-gray-100 hover:bg-gray-800 p-1 rounded-lg -ml-1"
+                    aria-label="返回列表"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
                   {chartPosition.stockCode} {chartPosition.stockName || ''} 日線圖
                 </h4>
                 <button
                   type="button"
                   onClick={closeChart}
-                  className="text-gray-400 hover:text-white p-1"
+                  aria-label="關閉"
+                  className="text-gray-400 hover:text-gray-100 hover:bg-gray-800 p-1.5 rounded-lg"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -1451,23 +1640,40 @@ export default function DataModal({
                 )}
                 {!chartLoading && !chartError && chartData.length > 0 && (
                   <>
-                    <div className="flex items-center gap-3 text-xs text-gray-400 mb-1">
-                      {MA_SERIES_CONFIG.map(({ key, color, label }) => (
-                        <span key={key} className="flex items-center gap-1">
-                          <span className="inline-block w-3 h-0.5" style={{ backgroundColor: color }} />
-                          {label}
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                      <div className="flex items-center gap-3 text-xs text-gray-400">
+                        {MA_SERIES_CONFIG.map(({ key, color, label }) => (
+                          <span key={key} className="flex items-center gap-1">
+                            <span className="inline-block w-3 h-0.5" style={{ backgroundColor: color }} />
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                      {chartSource?.sourceUsed && (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                            chartSource.isFallback
+                              ? 'bg-amber-900/50 text-amber-400 border border-amber-700'
+                              : 'bg-gray-800 text-gray-400 border border-gray-700'
+                          }`}
+                          title={chartSource.isFallback ? '主要來源無資料，已改用備援來源' : '資料來源'}
+                        >
+                          {chartSource.isFallback ? '⚠️ 備援來源' : '來源'}：{chartSource.sourceUsed}
                         </span>
-                      ))}
+                      )}
                     </div>
                     <div ref={chartContainerRef} className="w-full" style={{ height: 280 }} />
                   </>
                 )}
               </div>
               {!chartLoading && !chartError && chartData.length > 0 && chartPosition && (
-                <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-400 shrink-0">
-                  <span>進場：{new Date(chartPosition.entryDate).toLocaleDateString('zh-TW')} @ {chartPosition.avgEntryPrice.toLocaleString()}</span>
-                  <span>出場：{chartPosition.exitDate ? new Date(chartPosition.exitDate).toLocaleDateString('zh-TW') : '-'} @ {(chartPosition.avgExitPrice ?? 0).toLocaleString()}</span>
-                </div>
+                <>
+                  <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-400 shrink-0">
+                    <span>進場：{new Date(chartPosition.entryDate).toLocaleDateString('zh-TW')} @ {chartPosition.avgEntryPrice.toLocaleString()}</span>
+                    <span>出場：{chartPosition.exitDate ? new Date(chartPosition.exitDate).toLocaleDateString('zh-TW') : '-'} @ {(chartPosition.avgExitPrice ?? 0).toLocaleString()}</span>
+                  </div>
+                  <EntrySnapshot position={chartPosition} />
+                </>
               )}
               <div className="mt-3 pt-3 border-t border-gray-700 shrink-0 space-y-3">
                 <div>
@@ -1516,10 +1722,11 @@ export default function DataModal({
           )}
         </div>
 
-        <div className="sticky bottom-0 bg-gray-800 px-6 py-4 rounded-b-lg border-t border-gray-700">
+        <div className="sticky bottom-0 bg-gray-900/95 backdrop-blur px-6 py-3 border-t border-gray-800 flex items-center justify-between">
+          <span className="text-xs text-gray-600 hidden sm:inline">按 Esc 或點擊外側可關閉</span>
           <button
             onClick={onClose}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+            className="ml-auto px-5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium rounded-lg border border-gray-700 transition-colors text-sm"
           >
             關閉
           </button>

@@ -18,6 +18,11 @@ const US_SELL_REGULATORY_FEE_RATE = 0.0000278;
 /** 預設停損比例（進場價 × (1 - 8%)） */
 export const DEFAULT_STOP_LOSS_PERCENT = 0.08;
 
+/** 初始停損價 = 進場價 × (1 - 預設停損比例)，四捨五入至分；所有預設停損一律經此計算以保持一致 */
+export function initialStopPrice(entryPrice: number): number {
+  return Math.round(entryPrice * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
+}
+
 // ===== 型別定義 =====
 export type TradeUnit = 'SHARES' | 'LOTS'; // 零股 | 張
 export type SecurityType = 'STOCK' | 'ETF' | 'TDR' | 'WARRANT';

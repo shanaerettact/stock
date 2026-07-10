@@ -266,6 +266,8 @@ async function fetchTWSEHistory(
 }
 
 // 櫃買中心 TPEX 個股日成交（上櫃股票）
+// 使用現行端點 tpex.org.tw/www/zh-tw/afterTrading/tradingStock
+// （舊 st43_result.php 已於官網改版後下線，直接回傳 404）
 async function fetchTPEXHistory(
   stockCode: string,
   startDate: string,
@@ -279,23 +281,32 @@ async function fetchTPEXHistory(
     const mStart = y === startY ? startM : 1;
     const mEnd = y === endY ? endM : 12;
     for (let m = mStart; m <= mEnd; m++) {
-      const rocY = y - 1911;
-      const dParam = `${rocY}/${String(m).padStart(2, '0')}`;
+      // 現行端點以西元 YYYY/MM/DD 帶入欲查詢的月份
+      const dParam = `${y}/${String(m).padStart(2, '0')}/01`;
       try {
-        const url = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&se=AL&stkno=${stockCode}&d=${dParam}`;
-        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, next: { revalidate: 3600 } });
+        const url = `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=${stockCode}&date=${dParam}&response=json`;
+        const res = await fetch(url, {
+          headers: { Accept: 'application/json', 'User-Agent': YAHOO_CHART_UA },
+          next: { revalidate: 3600 },
+        });
         const json = await res.json();
-        const data = json.aaData ?? json;
+        // 新格式：{ tables: [{ data: [[日期,成交仟股,成交仟元,開,高,低,收,漲跌,筆數], ...] }] }
+        // 保留對舊格式（aaData / 直接陣列）的相容
+        const data = json?.tables?.[0]?.data ?? json?.aaData ?? (Array.isArray(json) ? json : null);
         if (!Array.isArray(data)) continue;
         for (const row of data) {
           const dateStr = typeof row[0] === 'string' ? row[0] : row.date;
-          const dateIso = dateStr.includes('/') ? rocDateToIso(dateStr) : dateStr;
+          if (!dateStr) continue;
+          const s = String(dateStr);
+          const dateIso = s.includes('/') ? rocDateToIso(s) : s;
           if (dateIso < startDate || dateIso > endDate) continue;
           const open = parsePrice(row[3] ?? row.open);
           const high = parsePrice(row[4] ?? row.high);
           const low = parsePrice(row[5] ?? row.low);
           const close = parsePrice(row[6] ?? row.close);
-          const vol = parseVolume(row[1] ?? row.volume);
+          // 成交量欄位為「成交仟股」，換算為股數以與 TWSE / Yahoo 的單位一致
+          const volKShares = parseVolume(row[1] ?? row.volume);
+          const vol = volKShares != null ? volKShares * 1000 : null;
           if (open != null && high != null && low != null && close != null) {
             result.push({ date: dateIso, open, high, low, close, volume: vol ?? undefined });
           }
@@ -356,15 +367,21 @@ async function fetchYahooHistory(
 
 type FetchSource = 'TWSE' | 'TPEX' | 'Yahoo';
 
+interface HistoryFetchResult {
+  history: HistoryCandle[];
+  sourcesTried: FetchSource[];
+  sourceUsed: FetchSource | null; // 實際成功回傳資料的來源（供 UI 標示備援）
+}
+
 async function fetchHistory(
   stockCode: string,
   startDate: string,
   endDate: string,
   market: '上市' | '上櫃' | null
-): Promise<{ history: HistoryCandle[]; sourcesTried: FetchSource[] }> {
+): Promise<HistoryFetchResult> {
   if (isUsTickerSymbol(stockCode)) {
     const history = await fetchYahooUsHistory(stockCode.trim(), startDate, endDate);
-    return { history, sourcesTried: ['Yahoo'] };
+    return { history, sourcesTried: ['Yahoo'], sourceUsed: history.length > 0 ? 'Yahoo' : null };
   }
 
   const sourcesTried: FetchSource[] = [];
@@ -381,9 +398,59 @@ async function fetchHistory(
     if (src === 'TWSE') history = await fetchTWSEHistory(stockCode, startDate, endDate);
     else if (src === 'TPEX') history = await fetchTPEXHistory(stockCode, startDate, endDate);
     else history = await fetchYahooHistory(stockCode, startDate, endDate, market);
-    if (history.length > 0) return { history, sourcesTried };
+    if (history.length > 0) return { history, sourcesTried, sourceUsed: src };
   }
-  return { history: [], sourcesTried };
+  return { history: [], sourcesTried, sourceUsed: null };
+}
+
+/**
+ * 歷史日線記憶體快取：外部（TWSE 逐月 / Yahoo / TPEX）抓取成本高，
+ * 快取讓「首次稍等、之後秒開」。TTL 內同一 (代號,區間,市場) 直接回傳。
+ */
+const HISTORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10 分鐘
+// 以 (代號,市場) 為鍵、保存已抓取的最大日期區間；請求落在區間內時直接切片回傳，
+// 讓單檔圖表（往前 300 天）與批次指標（52 週）兩條路徑共用同一份外部抓取結果
+const historyCache = new Map<
+  string,
+  { ts: number; startDate: string; endDate: string; value: HistoryFetchResult }
+>();
+
+function sliceHistory(value: HistoryFetchResult, startDate: string, endDate: string): HistoryFetchResult {
+  return {
+    ...value,
+    history: value.history.filter(d => d.date >= startDate && d.date <= endDate),
+  };
+}
+
+async function getHistoryCached(
+  stockCode: string,
+  startDate: string,
+  endDate: string,
+  market: '上市' | '上櫃' | null
+): Promise<HistoryFetchResult> {
+  const key = `${stockCode}|${market ?? ''}`;
+  const now = Date.now();
+  const hit = historyCache.get(key);
+  if (
+    hit &&
+    now - hit.ts < HISTORY_CACHE_TTL_MS &&
+    hit.value.history.length > 0 &&
+    hit.startDate <= startDate &&
+    hit.endDate >= endDate
+  ) {
+    return sliceHistory(hit.value, startDate, endDate);
+  }
+  // 未命中時抓涵蓋新舊需求的聯集區間，讓快取條目只會擴大、後續請求更容易命中
+  const fetchStart = hit && hit.startDate < startDate ? hit.startDate : startDate;
+  const fetchEnd = hit && hit.endDate > endDate ? hit.endDate : endDate;
+  const value = await fetchHistory(stockCode, fetchStart, fetchEnd, market);
+  historyCache.set(key, { ts: now, startDate: fetchStart, endDate: fetchEnd, value });
+  // 避免無上限成長：超過 500 筆時清掉最舊的一批
+  if (historyCache.size > 500) {
+    const oldest = [...historyCache.entries()].sort((a, b) => a[1].ts - b[1].ts).slice(0, 100);
+    for (const [k] of oldest) historyCache.delete(k);
+  }
+  return sliceHistory(value, startDate, endDate);
 }
 
 // 取得 52 周日期範圍（today - 365 天 ~ today）
@@ -403,7 +470,8 @@ async function calculateAdvancedMetrics(
   todayClosingPrice: number | null,
   todayVolume: number | null,
   benchmarkCloses: number[],
-  benchmarkCode: string
+  benchmarkCode: string,
+  marketHint: '上市' | '上櫃' | null = null
 ): Promise<{
   is52WeekHigh: boolean;
   week52High: number | null;
@@ -439,11 +507,11 @@ async function calculateAdvancedMetrics(
   startDate50Days.setDate(startDate50Days.getDate() - 70);
   const startDate50DaysStr = startDate50Days.toISOString().split('T')[0] ?? '';
 
-  // 取得 52 周歷史資料（證交所/櫃買/Yahoo）
-  const { history: history52Weeks } = await fetchHistory(stockCode, startDate52WeeksStr, endDateStr, null);
+  // 取得 52 周歷史資料（證交所/櫃買/Yahoo，帶市場提示以優先命中正確來源，並走快取）
+  const { history: history52Weeks } = await getHistoryCached(stockCode, startDate52WeeksStr, endDateStr, marketHint);
 
-  // 取得 50 日歷史資料（用於計算平均交易量）
-  const { history: history50Days } = await fetchHistory(stockCode, startDate50DaysStr, endDateStr, null);
+  // 50 日均量：直接由 52 周資料切出最近約 70 天，免二次外部抓取
+  const history50Days = history52Weeks.filter(d => d.date >= startDate50DaysStr);
 
   // 計算 52 周最高價
   let week52High: number | null = null;
@@ -530,10 +598,16 @@ export async function GET(request: NextRequest) {
       extendedStartDateObj.setDate(extendedStartDateObj.getDate() - 300);
       const extendedStartDate = extendedStartDateObj.toISOString().split('T')[0] ?? startDate;
 
-      const { history, sourcesTried } = await fetchHistory(code, extendedStartDate, endDate, market);
+      const { history, sourcesTried, sourceUsed } = await getHistoryCached(code, extendedStartDate, endDate, market);
       if (history.length === 0) {
         console.warn(`[歷史日線無資料] 代碼=${code} 市場=${market ?? '未知'} 已嘗試=${sourcesTried.join(',')}`);
       }
+
+      // 判斷是否為備援來源：實際命中的來源不是嘗試順序的第一個（該市場的主來源）即視為備援
+      // 由 fetchHistory 的 sourcesTried 推導，市場未知時也能正確標示（未知市場最容易 fallback）
+      const primarySource = sourcesTried[0] ?? null;
+      const isFallbackSource =
+        sourceUsed != null && primarySource != null && sourceUsed !== primarySource;
 
       const closes = history.map(d => d.close);
       const ma20Series = calculateSMA(closes, 20);
@@ -557,6 +631,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         data,
+        sourceUsed,        // 實際命中的來源：TWSE / TPEX / Yahoo
+        isFallbackSource,  // true 表示改用備援來源（例：上櫃改用 Yahoo）
         ...(history.length === 0 && { debug: { stockCode: code, market: market ?? '未知', sourcesTried } }),
       });
     }
@@ -578,7 +654,7 @@ export async function GET(request: NextRequest) {
     const { startDateStr: bench52wStart, endDateStr: bench52wEnd } = get52WeekRange();
     const [twBenchmarkHistory, usBenchmarkHistory] = await Promise.all([
       needsTwQuotes
-        ? fetchHistory('0050', bench52wStart, bench52wEnd, '上市').then(r => r.history)
+        ? getHistoryCached('0050', bench52wStart, bench52wEnd, '上市').then(r => r.history)
         : Promise.resolve([]),
       needsUsQuotes
         ? fetchYahooUsHistory('SPY', bench52wStart, bench52wEnd)
@@ -710,12 +786,16 @@ export async function GET(request: NextRequest) {
           const isUs = isUsTickerSymbol(result.stockCode);
           const benchmarkCloses = isUs ? usBenchmarkCloses : twBenchmarkCloses;
           const benchmarkCode = isUs ? 'SPY' : '0050';
+          // 依即時報價命中的市場給定歷史來源提示：TWSE→上市、TPEX→上櫃
+          const marketHint: '上市' | '上櫃' | null =
+            result.market === 'TWSE' ? '上市' : result.market === 'TPEX' ? '上櫃' : null;
           const metrics = await calculateAdvancedMetrics(
             result.stockCode,
             result.closingPrice,
             result.tradeVolume,
             benchmarkCloses,
-            benchmarkCode
+            benchmarkCode,
+            marketHint
           );
 
           return {

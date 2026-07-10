@@ -5,10 +5,19 @@ import TradeForm from '@/components/TradeForm';
 import type { TradeFormData } from '@/components/TradeForm';
 import DataModal from '@/components/DataModal';
 import AIAnalysisModal from '@/components/AIAnalysisModal';
-import PositionsTable from '@/components/PositionsTable';
-import type { Trade, Position } from '@/lib/types';
+import PositionsTable, { effectiveAvgEntryPrice } from '@/components/PositionsTable';
+import type { Trade, Position, StockPrice } from '@/lib/types';
+import { calculateTrailingStop, calculateUnrealizedPnL } from '@/lib/types';
+import { initialStopPrice } from '@/lib/tradeCalculations';
+import { calculatePerformanceMetrics, toClosedPosition } from '@/lib/performanceMetrics';
 
 const ACCOUNT_ID = 'cmj47funv00007jwbtrkd22t9';
+
+// 台股慣例：漲紅跌綠（正為紅、負為綠）
+const pnlText = (v: number) => (v >= 0 ? 'text-red-400' : 'text-green-400');
+const sign = (v: number) => (v >= 0 ? '+' : '');
+
+type FeatureKey = 'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly';
 
 export default function HomePage() {
   const [showForm, setShowForm] = useState(false);
@@ -19,7 +28,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
-  const [selectedFeature, setSelectedFeature] = useState<'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly' | null>(null);
+  const [selectedFeature, setSelectedFeature] = useState<FeatureKey | null>(null);
   const [accountBalance, setAccountBalance] = useState(100000);
   const [initialCapital, setInitialCapital] = useState(100000);
   const [recalculating, setRecalculating] = useState(false);
@@ -28,6 +37,14 @@ export default function HomePage() {
   const [allUSTrades, setAllUSTrades] = useState<Trade[]>([]);
   const [allTWPositions, setAllTWPositions] = useState<Position[]>([]);
   const [allUSPositions, setAllUSPositions] = useState<Position[]>([]);
+
+  // 今日收盤價（改由 page 統一抓取，供 KPI 與持倉表共用）
+  const [stockPrices, setStockPrices] = useState<Record<string, StockPrice>>({});
+  const [fetchingPrices, setFetchingPrices] = useState(false);
+  const [pricesFetchedAt, setPricesFetchedAt] = useState<string | null>(null);
+
+  const currencySuffix = activeMarket === 'US' ? '美元' : '元';
+  const benchmarkCode = activeMarket === 'US' ? 'SPY' : '0050';
 
   // 顯示訊息
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -39,14 +56,13 @@ export default function HomePage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      // 添加時間戳防止快取
       const timestamp = Date.now();
       const [tradesRes, positionsRes, accountRes] = await Promise.all([
         fetch(`/api/trades?accountId=${ACCOUNT_ID}&market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' }),
         fetch(`/api/positions?accountId=${ACCOUNT_ID}&market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' }),
         fetch(`/api/account?market=${activeMarket}&_t=${timestamp}`, { cache: 'no-store' })
       ]);
-      
+
       if (tradesRes.ok) setTrades(await tradesRes.json());
       if (positionsRes.ok) setPositions(await positionsRes.json());
       if (accountRes.ok) {
@@ -61,19 +77,160 @@ export default function HomePage() {
     }
   };
 
-  useEffect(() => { loadData(); }, [activeMarket]);
-
-  // 開啟功能 Modal 時重新載入，確保 DataModal、R 值分析等顯示最新買賣資料
+  // 切換市場時清空舊市場的收盤價，避免代號錯置
   useEffect(() => {
-    if (selectedFeature) loadData();
-  }, [selectedFeature]);
+    setStockPrices({});
+    setPricesFetchedAt(null);
+    loadData();
+  }, [activeMarket]);
+
+  const openPositions = useMemo(() => positions.filter(p => p.status === 'OPEN'), [positions]);
+  const closedPositions = useMemo(() => positions.filter(p => p.status === 'CLOSED'), [positions]);
+
+  // 取得今日收盤價 + 追蹤停損只升不降
+  const fetchStockPrices = async () => {
+    if (openPositions.length === 0) {
+      showMessage('error', '目前沒有持倉部位');
+      return;
+    }
+    try {
+      setFetchingPrices(true);
+      const codes = [...new Set([...openPositions.map(p => p.stockCode), benchmarkCode])].join(',');
+      const res = await fetch(`/api/stock-price?codes=${codes}`);
+      if (!res.ok) throw new Error('取得收盤價失敗');
+      const result = await res.json();
+      if (!result.success || !result.data) throw new Error(result.error || '取得收盤價失敗');
+
+      const map: Record<string, StockPrice> = {};
+      result.data.forEach((p: StockPrice) => { map[p.stockCode] = p; });
+      setStockPrices(map);
+      setPricesFetchedAt(
+        new Date().toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      );
+
+      // 收集所有停損上移結果後一次更新 state，避免逐檔 setPositions 造成連續重繪
+      const newStops = new Map<string, number>();
+      await Promise.all(openPositions.map(async (position) => {
+        const cp = map[position.stockCode]?.closingPrice ?? null;
+        if (cp === null) return;
+        const avgEntry = effectiveAvgEntryPrice(position);
+        const originalStop = position.stopLossPrice ?? initialStopPrice(avgEntry);
+        const trailing = calculateTrailingStop(avgEntry, cp, originalStop);
+        if (!trailing || !trailing.isActivated) return;
+        if (trailing.stopLossPrice > (position.stopLossPrice ?? 0)) {
+          try {
+            await fetch(`/api/positions?id=${position.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ stopLossPrice: trailing.stopLossPrice }),
+            });
+            newStops.set(position.id, trailing.stopLossPrice);
+          } catch (err) {
+            console.warn(`${position.stockCode} 追蹤停損更新失敗:`, err);
+          }
+        }
+      }));
+      if (newStops.size > 0) {
+        setPositions(prev => prev.map(p => {
+          const s = newStops.get(p.id);
+          return s != null ? { ...p, stopLossPrice: s } : p;
+        }));
+      }
+
+      showMessage('success', `✅ 已取得今日收盤價${newStops.size > 0 ? `，已鎖定 ${newStops.size} 檔追蹤停損` : ''}！`);
+    } catch (error) {
+      showMessage('error', error instanceof Error ? error.message : '取得收盤價失敗');
+    } finally {
+      setFetchingPrices(false);
+    }
+  };
+
+  // 進場指標快照：新買進建立部位後，best-effort 抓當下 RS/趨勢/距52週高/量比並寫入部位
+  const captureEntrySnapshot = async (stockCode: string, market: 'TW' | 'US') => {
+    try {
+      const posRes = await fetch(
+        `/api/positions?accountId=${ACCOUNT_ID}&market=${market}&stockCode=${encodeURIComponent(stockCode)}&status=OPEN&_t=${Date.now()}`,
+        { cache: 'no-store' }
+      );
+      if (!posRes.ok) return;
+      const posList: Position[] = await posRes.json();
+      const target = posList.find(p => p.rsAtEntry == null && p.trendAtEntry == null);
+      if (!target) return;
+
+      const priceRes = await fetch(`/api/stock-price?codes=${encodeURIComponent(stockCode)}`, { cache: 'no-store' });
+      if (!priceRes.ok) return;
+      const pj = await priceRes.json();
+      const row = Array.isArray(pj?.data) ? pj.data[0] : null;
+      if (!row) return;
+
+      const snapshot: Record<string, number | string> = {};
+      if (typeof row.rsValue === 'number') snapshot.rsAtEntry = row.rsValue;
+      if (typeof row.trendAlignment === 'string') snapshot.trendAtEntry = row.trendAlignment;
+      if (typeof row.volumeRatio === 'number') snapshot.volRatioAtEntry = row.volumeRatio;
+      if (typeof row.closingPrice === 'number' && typeof row.week52High === 'number' && row.week52High > 0) {
+        snapshot.pctFrom52wHighAtEntry = (row.closingPrice / row.week52High - 1) * 100;
+      }
+      if (Object.keys(snapshot).length === 0) return;
+
+      await fetch(`/api/positions?id=${target.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(snapshot),
+      });
+      await loadData();
+    } catch { /* best-effort，失敗不影響交易 */ }
+  };
+
+  // ===== KPI 計算 =====
+  const kpis = useMemo(() => {
+    const holdingCost = openPositions.reduce(
+      (s, p) => s + (p.totalInvested ?? p.avgEntryPrice * p.totalQuantity), 0
+    );
+    // 勝率/盈虧比/平均R 與績效分析 modal 共用同一份定義（performanceMetrics）
+    const perf = calculatePerformanceMetrics(closedPositions.map(toClosedPosition));
+    const realizedPnL = perf.totalPnL;
+    const winRate = closedPositions.length ? perf.winRate : null;
+    const pnlRatio = perf.profitFactor;
+    const avgR = perf.avgRValue;
+    const expectancy = closedPositions.length ? realizedPnL / closedPositions.length : null;
+    const fundUsage = initialCapital > 0 ? (holdingCost / initialCapital) * 100 : 0;
+    const totalAssets = accountBalance + holdingCost;
+
+    let unreal = 0;
+    let unrealBase = 0;
+    let priced = 0;
+    // 組合總風險（Portfolio Heat）：Σ 各未平倉部位「若觸及目前停損」的虧損金額 ÷ 權益
+    // 停損已鎖到成本之上者，該部位風險視為 0（已保本/鎖利）
+    let openRisk = 0;
+    openPositions.forEach(p => {
+      const avgEntry = effectiveAvgEntryPrice(p);
+      const stop = p.stopLossPrice ?? initialStopPrice(avgEntry);
+      const risk = (avgEntry - stop) * p.totalQuantity;
+      if (risk > 0) openRisk += risk;
+
+      const cp = stockPrices[p.stockCode]?.closingPrice ?? null;
+      if (cp == null) return;
+      const { amount } = calculateUnrealizedPnL(avgEntry, cp, p.totalQuantity);
+      if (amount != null) { unreal += amount; unrealBase += avgEntry * p.totalQuantity; priced++; }
+    });
+    const equity = totalAssets > 0 ? totalAssets : initialCapital;
+    const heatPct = equity > 0 ? (openRisk / equity) * 100 : 0;
+
+    return {
+      holdingCost, realizedPnL, winRate, pnlRatio, avgR, expectancy, fundUsage, totalAssets,
+      accountBalance,
+      winCount: perf.winningTrades,
+      unreal, unrealPct: unrealBase > 0 ? (unreal / unrealBase) * 100 : null,
+      hasPrices: priced > 0,
+      openRisk, heatPct,
+    };
+  }, [openPositions, closedPositions, stockPrices, accountBalance, initialCapital]);
 
   // 提交交易
   const handleSubmit = async (data: TradeFormData) => {
     try {
       const url = editingTrade ? `/api/trades/${editingTrade.id}` : '/api/trades';
       const method = editingTrade ? 'PUT' : 'POST';
-      
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -89,9 +246,7 @@ export default function HomePage() {
         const fieldErrors = errorData.errors as Record<string, string> | undefined;
         const detail =
           fieldErrors && Object.keys(fieldErrors).length > 0
-            ? Object.entries(fieldErrors)
-                .map(([k, v]) => `${k}: ${v}`)
-                .join('；')
+            ? Object.entries(fieldErrors).map(([k, v]) => `${k}: ${v}`).join('；')
             : errorData.error || '操作失敗';
         throw new Error(detail);
       }
@@ -99,7 +254,6 @@ export default function HomePage() {
       showMessage('success', editingTrade ? '✅ 交易記錄更新成功！' : '✅ 交易記錄新增成功！');
       setEditingTrade(null);
       setShowForm(false);
-      // 重新計算部位（連結孤立賣出、更新平倉狀態），確保即時同步
       try {
         const recalcRes = await fetch('/api/positions/recalculate', {
           method: 'POST',
@@ -107,24 +261,25 @@ export default function HomePage() {
           body: JSON.stringify({ accountId: ACCOUNT_ID }),
         });
         if (!recalcRes.ok) throw new Error('recalc failed');
-      } catch { /* 忽略，loadData 仍會取得現有資料 */ }
+      } catch { /* 忽略 */ }
       await loadData();
+      // 新買進 → 擷取進場指標快照（不阻塞主流程）
+      if (!editingTrade && data.tradeType === 'BUY') {
+        captureEntrySnapshot(data.stockCode.trim(), activeMarket);
+      }
     } catch (error) {
       showMessage('error', error instanceof Error ? error.message : '操作失敗');
     }
   };
 
-  // 編輯交易
   const handleEdit = (trade: Trade) => {
     setEditingTrade(trade);
     setActiveMarket((trade.market === 'US' ? 'US' : 'TW'));
     setShowForm(true);
   };
 
-  // 刪除交易
   const handleDelete = async (tradeId: string) => {
     if (!confirm('確定要刪除這筆交易記錄嗎？')) return;
-
     try {
       setDeletingTradeId(tradeId);
       const response = await fetch(`/api/trades/${tradeId}`, { method: 'DELETE' });
@@ -150,10 +305,6 @@ export default function HomePage() {
     setShowForm(false);
   };
 
-  const handlePositionStopLossUpdate = (id: string, stopLossPrice: number) => {
-    setPositions(prev => prev.map(p => p.id === id ? { ...p, stopLossPrice } : p));
-  };
-
   const handleUpdateCapital = async (newCapital: number) => {
     try {
       const response = await fetch('/api/account', {
@@ -175,7 +326,6 @@ export default function HomePage() {
     }
   };
 
-  // 重新計算所有部位
   const handleRecalculatePositions = async () => {
     try {
       setRecalculating(true);
@@ -184,25 +334,18 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accountId: ACCOUNT_ID }),
       });
-
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || '重新計算失敗');
       }
-
       const result = await response.json();
-      
-      // 顯示餘額重算結果
       let balanceMsg = '';
       if (result.balanceRecalculation?.success) {
         const diff = result.balanceRecalculation.difference;
-        if (Math.abs(diff) > 1) {
-          balanceMsg = `，餘額已調整 ${diff >= 0 ? '+' : ''}${diff.toLocaleString()} 元`;
-        } else {
-          balanceMsg = '，餘額無需調整';
-        }
+        balanceMsg = Math.abs(diff) > 1
+          ? `，餘額已調整 ${diff >= 0 ? '+' : ''}${diff.toLocaleString()} 元`
+          : '，餘額無需調整';
       }
-      
       showMessage('success', `✅ ${result.message}，已關聯 ${result.linkedTrades} 筆孤立交易${balanceMsg}`);
       await loadData();
     } catch (error) {
@@ -229,24 +372,83 @@ export default function HomePage() {
     setShowAIModal(true);
   };
 
-  const openPositions = positions.filter(p => p.status === 'OPEN');
-  const closedPositions = positions.filter(p => p.status === 'CLOSED');
+  const openFeature = async (key: FeatureKey) => {
+    await loadData();
+    setSelectedFeature(key);
+  };
 
   return (
-    <main className="min-h-screen">
-      {/* 頁首 */}
-      <header className="bg-gradient-to-r from-gray-900 to-gray-800 text-white shadow-lg border-b border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <h1 className="text-4xl font-bold mb-2">📈 股票交易統計系統</h1>
-          <p className="text-gray-400 text-lg">專業的交易記錄與績效分析平台</p>
+    <main className="min-h-screen bg-gray-950">
+      {/* ===== 頂部工具列 ===== */}
+      <header className="sticky top-0 z-20 backdrop-blur bg-gray-950/80 border-b border-gray-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">📈</span>
+            <div className="leading-tight">
+              <div className="font-extrabold text-gray-100 tracking-tight">股票交易統計</div>
+              <div className="text-[11px] text-gray-500 hidden sm:block">專業交易記錄與績效分析</div>
+            </div>
+          </div>
+
+          <div className="inline-flex bg-gray-900 border border-gray-700 rounded-lg p-0.5" role="group" aria-label="市場">
+            {(['TW', 'US'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setActiveMarket(m)}
+                aria-pressed={activeMarket === m}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-semibold transition-colors ${
+                  activeMarket === m ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {m === 'TW' ? '🇹🇼 台股' : '🇺🇸 美股'}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1" />
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={fetchStockPrices}
+              disabled={fetchingPrices}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-gray-700 bg-gray-900 text-gray-200 hover:border-gray-600 disabled:opacity-60 transition-colors"
+            >
+              {fetchingPrices ? (
+                <>
+                  <Spinner /> 取得中…
+                </>
+              ) : (
+                <>📡 取得收盤價</>
+              )}
+            </button>
+            <button
+              onClick={handleRecalculatePositions}
+              disabled={recalculating}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-gray-700 bg-gray-900 text-gray-200 hover:border-gray-600 disabled:opacity-60 transition-colors"
+            >
+              {recalculating ? (<><Spinner /> 計算中…</>) : (<>🔄 重算部位</>)}
+            </button>
+            <button
+              onClick={handleOpenAIModal}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-transparent text-purple-100 bg-gradient-to-b from-purple-700 to-purple-800 hover:from-purple-600 transition-colors"
+            >
+              🤖 AI 分析
+            </button>
+            <button
+              onClick={() => { setEditingTrade(null); setShowForm(true); }}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+            >
+              ➕ 新增交易
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* 主要內容 */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* 訊息通知 */}
         {message && (
-          <div className={`mb-6 p-4 rounded-lg ${
+          <div className={`p-3.5 rounded-lg text-sm ${
             message.type === 'success'
               ? 'bg-green-900/50 border border-green-700 text-green-300'
               : 'bg-red-900/50 border border-red-700 text-red-300'
@@ -255,129 +457,7 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* 歡迎區塊 */}
-        {!showForm && (
-          <div className="space-y-8">
-            <div className="flex flex-wrap gap-2 border-b border-gray-700 pb-4">
-              {(['TW', 'US'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setActiveMarket(m)}
-                  className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                    activeMarket === m
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600'
-                  }`}
-                >
-                  {m === 'TW' ? '🇹🇼 台股' : '🇺🇸 美股'}
-                </button>
-              ))}
-            </div>
-            {/* 快速統計 */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <StatCard label="交易總數" value={trades.length} unit="筆" color="blue" />
-              <StatCard label="持倉部位" value={openPositions.length} unit="個" color="orange" />
-              <StatCard label="已平倉" value={closedPositions.length} unit="個" color="green" />
-            </div>
-
-            {/* 工具按鈕 */}
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={handleOpenAIModal}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-gray-200 font-medium rounded-lg transition-colors text-sm border border-purple-600"
-              >
-                🤖 AI 分析
-              </button>
-              <button
-                onClick={handleRecalculatePositions}
-                disabled={recalculating}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-gray-200 font-medium rounded-lg transition-colors text-sm border border-gray-600"
-              >
-                {recalculating ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    計算中...
-                  </>
-                ) : (
-                <>🔄 重新計算部位與餘額</>
-              )}
-              </button>
-            </div>
-
-            {/* 持倉部位 */}
-            <PositionsTable
-              positions={positions}
-              initialCapital={initialCapital}
-              onMessage={showMessage}
-              currencySuffix={activeMarket === 'US' ? '美元' : '元'}
-              onPositionStopLossUpdate={handlePositionStopLossUpdate}
-              activeMarket={activeMarket}
-            />
-
-            {/* 最近交易記錄 */}
-            {trades.length > 0 && (
-              <TradesTable 
-                trades={trades}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                deletingTradeId={deletingTradeId}
-                currencySuffix={activeMarket === 'US' ? '美元' : '元'}
-              />
-            )}
-
-            {/* 空狀態提示 */}
-            {trades.length === 0 && !loading && (
-              <EmptyState />
-            )}
-
-            {/* 功能介紹卡片：先載入最新資料再開啟 Modal，確保已平倉／R 值即時 */}
-            <FeatureCards onSelect={async (key) => { await loadData(); setSelectedFeature(key); }} />
-
-            {/* AI 分析 Modal */}
-            <AIAnalysisModal
-              isOpen={showAIModal}
-              onClose={() => setShowAIModal(false)}
-              twTrades={allTWTrades}
-              usTrades={allUSTrades}
-              twPositions={allTWPositions}
-              usPositions={allUSPositions}
-            />
-
-            {/* 資料統計 Modal */}
-            {selectedFeature && (
-              <DataModal
-                isOpen={!!selectedFeature}
-                onClose={() => setSelectedFeature(null)}
-                type={selectedFeature}
-                trades={trades}
-                positions={positions}
-                accountBalance={accountBalance}
-                initialCapital={initialCapital}
-                activeMarket={activeMarket}
-                onUpdateCapital={handleUpdateCapital}
-                onRefreshData={loadData}
-              />
-            )}
-
-            {/* 新增交易 */}
-            <div className="flex justify-center">
-              <button
-                onClick={() => setShowForm(true)}
-                className="w-full max-w-md bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition-colors text-lg"
-              >
-                ➕ 新增交易記錄
-              </button>
-            </div>
-
-          </div>
-        )}
-
-        {/* 交易表單 */}
-        {showForm && (
+        {showForm ? (
           <TradeFormWrapper
             editingTrade={editingTrade}
             onSubmit={handleSubmit}
@@ -385,13 +465,92 @@ export default function HomePage() {
             activeMarket={activeMarket}
             onActiveMarketChange={setActiveMarket}
           />
+        ) : (
+          <>
+            {/* ===== 今日總覽 KPI ===== */}
+            <section>
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-xs font-bold tracking-widest uppercase text-gray-500">今日總覽</h2>
+                <div className="flex-1 h-px bg-gradient-to-r from-gray-800 to-transparent" />
+                <span className="text-xs text-gray-500">
+                  {pricesFetchedAt ? `更新 ${pricesFetchedAt} · 收盤` : '尚未取得收盤價'}
+                </span>
+              </div>
+              <KpiStrip
+                kpis={kpis}
+                currencySuffix={currencySuffix}
+                closedCount={closedPositions.length}
+                onFetchPrices={fetchStockPrices}
+              />
+            </section>
+
+            {/* ===== 持倉部位 ===== */}
+            <PositionsTable
+              positions={positions}
+              initialCapital={initialCapital}
+              currencySuffix={currencySuffix}
+              activeMarket={activeMarket}
+              stockPrices={stockPrices}
+            />
+
+            {/* ===== 分析與紀錄 ===== */}
+            <section>
+              <div className="flex items-center gap-3 mb-3">
+                <h2 className="text-xs font-bold tracking-widest uppercase text-gray-500">分析與紀錄</h2>
+                <div className="flex-1 h-px bg-gradient-to-r from-gray-800 to-transparent" />
+              </div>
+              <AnalysisNav
+                onSelect={openFeature}
+                closedCount={closedPositions.length}
+                tradeCount={trades.length}
+              />
+            </section>
+
+            {/* ===== 交易記錄（可編輯） ===== */}
+            {trades.length > 0 ? (
+              <TradesTable
+                trades={trades}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                deletingTradeId={deletingTradeId}
+                currencySuffix={currencySuffix}
+              />
+            ) : (
+              !loading && <EmptyState onAdd={() => { setEditingTrade(null); setShowForm(true); }} />
+            )}
+          </>
         )}
       </div>
 
-      {/* 頁尾 */}
-      <footer className="bg-gray-950 text-gray-400 mt-16 border-t border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center">
-          <p>© 2024 股票交易統計系統 - 祝您交易順利，穩定獲利！📈</p>
+      {/* AI 分析 Modal */}
+      <AIAnalysisModal
+        isOpen={showAIModal}
+        onClose={() => setShowAIModal(false)}
+        twTrades={allTWTrades}
+        usTrades={allUSTrades}
+        twPositions={allTWPositions}
+        usPositions={allUSPositions}
+      />
+
+      {/* 資料統計 Modal */}
+      {selectedFeature && (
+        <DataModal
+          isOpen={!!selectedFeature}
+          onClose={() => setSelectedFeature(null)}
+          type={selectedFeature}
+          trades={trades}
+          positions={positions}
+          accountBalance={accountBalance}
+          initialCapital={initialCapital}
+          activeMarket={activeMarket}
+          onUpdateCapital={handleUpdateCapital}
+          onRefreshData={loadData}
+        />
+      )}
+
+      <footer className="border-t border-gray-800 mt-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 text-center text-gray-500 text-sm">
+          © 2024 股票交易統計系統 · 祝您交易順利，穩定獲利 📈
         </div>
       </footer>
     </main>
@@ -400,55 +559,145 @@ export default function HomePage() {
 
 // ===== 子元件 =====
 
-function StatCard({ label, value, unit, color }: { label: string; value: number; unit: string; color: 'blue' | 'orange' | 'green' }) {
-  const colorClass = {
-    blue: 'text-blue-400',
-    orange: 'text-orange-400',
-    green: 'text-green-400',
-  }[color];
-
+function Spinner() {
   return (
-    <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
-      <div className="text-sm text-gray-400 mb-1">{label}</div>
-      <div className={`text-3xl font-bold ${colorClass}`}>{value}</div>
-      <div className="text-xs text-gray-500 mt-1">{unit}</div>
+    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  );
+}
+
+interface KpiData {
+  totalAssets: number;
+  accountBalance: number;
+  holdingCost: number;
+  realizedPnL: number;
+  winRate: number | null;
+  pnlRatio: number | null;
+  avgR: number | null;
+  expectancy: number | null;
+  fundUsage: number;
+  winCount: number;
+  unreal: number;
+  unrealPct: number | null;
+  hasPrices: boolean;
+  openRisk: number;
+  heatPct: number;
+}
+
+function KpiTile({ label, sub, children }: { label: React.ReactNode; sub?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+      <div className="text-xs text-gray-400">{label}</div>
+      <div className="mt-1.5 text-2xl font-extrabold tracking-tight tabular-nums">{children}</div>
+      {sub && <div className="mt-1 text-[11px] text-gray-500">{sub}</div>}
     </div>
   );
 }
 
-function FeatureCards({ onSelect }: { onSelect: (feature: 'trades' | 'performance' | 'funds' | 'positions' | 'rvalue' | 'monthly') => void }) {
-  const features = [
-    { key: 'trades' as const, icon: '📝', title: '交易記錄', desc: '記錄每筆買賣，自動計算手續費與交易稅' },
-    { key: 'performance' as const, icon: '📊', title: '績效分析', desc: '勝率、盈虧比、期望值、R 值等專業指標' },
-    { key: 'funds' as const, icon: '💰', title: '資金管理', desc: '追蹤帳戶餘額、最大回撤、風險控制' },
-    { key: 'positions' as const, icon: '📈', title: '已平倉紀錄', desc: '成對交易追蹤，計算持有天數與報酬率' },
-    { key: 'rvalue' as const, icon: '🎲', title: 'R 值分析', desc: '風險報酬比計算，量化交易品質' },
-    { key: 'monthly' as const, icon: '📅', title: '月度統計', desc: '按月份統計績效，找出交易規律' },
-  ];
+function KpiStrip({
+  kpis, currencySuffix, closedCount, onFetchPrices,
+}: {
+  kpis: KpiData;
+  currencySuffix: string;
+  closedCount: number;
+  onFetchPrices: () => void;
+}) {
+  const fundColor = kpis.fundUsage > 80 ? 'bg-red-500' : kpis.fundUsage > 50 ? 'bg-amber-500' : 'bg-green-500';
+  const fundText = kpis.fundUsage > 80 ? 'text-red-400' : kpis.fundUsage > 50 ? 'text-amber-400' : 'text-green-400';
+  // 組合總風險（Heat）常見控在 6~10% 內
+  const heatText = kpis.heatPct > 10 ? 'text-red-400' : kpis.heatPct > 6 ? 'text-amber-400' : 'text-green-400';
 
   return (
-    <div className="bg-gray-900 rounded-lg shadow-md p-8 border border-gray-800">
-      <h2 className="text-2xl font-bold text-gray-100 mb-6">🎯 核心功能</h2>
-      <p className="text-gray-400 mb-6 text-sm">點擊功能卡片查看詳細說明</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {features.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => onSelect(f.key)}
-            className="bg-gradient-to-br from-gray-800 to-gray-850 hover:from-gray-700 hover:to-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1 text-left w-full"
-          >
-            <div className="text-4xl mb-3">{f.icon}</div>
-            <h3 className="text-lg font-semibold text-gray-200 mb-2">{f.title}</h3>
-            <p className="text-gray-400 text-sm mb-3">{f.desc}</p>
-            <div className="text-blue-400 text-xs font-semibold flex items-center gap-1">
-              點擊查看詳情
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </button>
-        ))}
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <KpiTile label="總資產" sub={`餘額 ${Math.round(kpis.accountBalance).toLocaleString()} ＋ 持倉 ${Math.round(kpis.holdingCost).toLocaleString()}`}>
+        <span className="text-gray-100">{Math.round(kpis.totalAssets).toLocaleString()} <span className="text-sm font-semibold text-gray-500">{currencySuffix}</span></span>
+      </KpiTile>
+
+      <KpiTile
+        label={<>未實現損益 <span className="text-gray-600">今日</span></>}
+        sub={kpis.hasPrices
+          ? <span className={pnlText(kpis.unreal)}>{kpis.unrealPct != null ? `${sign(kpis.unrealPct)}${kpis.unrealPct.toFixed(2)}%` : ''} · 持倉浮動</span>
+          : <button onClick={onFetchPrices} className="text-blue-400 hover:underline">點此取得收盤價 →</button>}
+      >
+        {kpis.hasPrices
+          ? <span className={pnlText(kpis.unreal)}>{sign(kpis.unreal)}{Math.round(kpis.unreal).toLocaleString()}</span>
+          : <span className="text-gray-600">—</span>}
+      </KpiTile>
+
+      <KpiTile label="已實現損益" sub={`${closedCount} 筆平倉`}>
+        <span className={pnlText(kpis.realizedPnL)}>{sign(kpis.realizedPnL)}{Math.round(kpis.realizedPnL).toLocaleString()}</span>
+      </KpiTile>
+
+      <KpiTile
+        label="勝率"
+        sub={kpis.pnlRatio != null ? `${kpis.winCount} 勝 / ${closedCount} · 盈虧比 ${kpis.pnlRatio.toFixed(2)}` : `${kpis.winCount} 勝 / ${closedCount}`}
+      >
+        {kpis.winRate != null
+          ? <span className="text-gray-100">{kpis.winRate.toFixed(1)}<span className="text-sm font-semibold text-gray-500">%</span></span>
+          : <span className="text-gray-600">—</span>}
+      </KpiTile>
+
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+        <div className="text-xs text-gray-400">資金使用率</div>
+        <div className={`mt-1.5 text-2xl font-extrabold tracking-tight tabular-nums ${fundText}`}>
+          {kpis.fundUsage.toFixed(1)}<span className="text-sm font-semibold text-gray-500">%</span>
+        </div>
+        <div className="mt-2 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${fundColor} transition-all duration-700`} style={{ width: `${Math.min(kpis.fundUsage, 100)}%` }} />
+        </div>
+        <div className="mt-1.5 text-[11px] text-gray-500 flex items-center justify-between">
+          <span title="組合總風險 Heat：若所有部位觸及目前停損的總虧損 ÷ 權益">風險熱度</span>
+          <span className={`font-semibold tabular-nums ${heatText}`}>
+            {kpis.heatPct.toFixed(1)}% <span className="text-gray-600">({Math.round(kpis.openRisk).toLocaleString()})</span>
+          </span>
+        </div>
       </div>
+
+      <KpiTile
+        label="平均 R 值"
+        sub={kpis.expectancy != null ? `期望值 ${sign(kpis.expectancy)}${Math.round(kpis.expectancy).toLocaleString()} / 筆` : '尚無平倉資料'}
+      >
+        {kpis.avgR != null
+          ? <span className={pnlText(kpis.avgR)}>{sign(kpis.avgR)}{kpis.avgR.toFixed(2)}<span className="text-sm font-semibold text-gray-500">R</span></span>
+          : <span className="text-gray-600">—</span>}
+      </KpiTile>
+    </div>
+  );
+}
+
+function AnalysisNav({
+  onSelect, closedCount, tradeCount,
+}: {
+  onSelect: (key: FeatureKey) => void;
+  closedCount: number;
+  tradeCount: number;
+}) {
+  const items: { key: FeatureKey; icon: string; label: string; count?: number }[] = [
+    { key: 'performance', icon: '📊', label: '績效分析' },
+    { key: 'funds', icon: '💰', label: '資金管理' },
+    { key: 'rvalue', icon: '🎲', label: 'R 值分析' },
+    { key: 'monthly', icon: '📅', label: '月度統計' },
+    { key: 'positions', icon: '📈', label: '已平倉', count: closedCount },
+    { key: 'trades', icon: '📝', label: '交易統計', count: tradeCount },
+  ];
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+      {items.map((it) => (
+        <button
+          key={it.key}
+          onClick={() => onSelect(it.key)}
+          className="group flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800/60 transition-colors text-left"
+        >
+          <span className="text-lg">{it.icon}</span>
+          <span className="flex-1 text-sm font-semibold text-gray-200">{it.label}</span>
+          {it.count != null && (
+            <span className="text-[11px] text-gray-500 bg-gray-800 border border-gray-700 rounded-full px-1.5">{it.count}</span>
+          )}
+          <span className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -461,7 +710,6 @@ function TradeFormWrapper({ editingTrade, onSubmit, onCancel, activeMarket, onAc
   activeMarket: 'TW' | 'US';
   onActiveMarketChange: (m: 'TW' | 'US') => void;
 }) {
-  // 使用 useMemo 緩存 initialData，只有當 editingTrade.id 改變時才重新創建
   const initialData = useMemo(() => {
     if (!editingTrade) return undefined;
     return {
@@ -476,14 +724,14 @@ function TradeFormWrapper({ editingTrade, onSubmit, onCancel, activeMarket, onAc
       isDayTrade: editingTrade.isDayTrade || false,
       plannedStopLoss: '',
     };
-  }, [editingTrade?.id]); // 只依賴 id，避免內容變化導致重新創建
+  }, [editingTrade?.id]);
 
   const formMarket: 'TW' | 'US' = editingTrade
     ? ((editingTrade.market === 'US' ? 'US' : 'TW'))
     : activeMarket;
 
   return (
-    <div className="bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-700">
+    <div className="bg-gray-900 rounded-2xl shadow-xl p-6 sm:p-8 border border-gray-700">
       <h2 className="text-2xl font-bold text-gray-100 mb-2">
         {editingTrade ? '✏️ 編輯交易記錄' : '📝 新增交易記錄'}
       </h2>
@@ -533,7 +781,6 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
   const [searchKeyword, setSearchKeyword] = useState('');
   const itemsPerPage = 10;
 
-  // 依關鍵字篩選交易記錄（股票代號或名稱）
   const filteredTrades = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
     if (!keyword) return trades;
@@ -544,62 +791,37 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
   }, [trades, searchKeyword]);
 
   const totalPages = Math.ceil(filteredTrades.length / itemsPerPage);
-
-  // 計算當前頁的資料範圍
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const currentTrades = filteredTrades.slice(startIndex, endIndex);
 
-  // 當交易記錄或搜尋關鍵字變更時，重置到第一頁
   useEffect(() => {
     setCurrentPage(1);
   }, [trades.length, searchKeyword]);
-  
-  // 生成頁碼按鈕
+
   const getPageNumbers = () => {
     const pages: (number | string)[] = [];
     const maxVisiblePages = 5;
-    
     if (totalPages <= maxVisiblePages) {
-      // 如果總頁數少於等於最大顯示頁數，顯示所有頁碼
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else if (currentPage <= 3) {
+      for (let i = 1; i <= 5; i++) pages.push(i);
+      pages.push('...'); pages.push(totalPages);
+    } else if (currentPage >= totalPages - 2) {
+      pages.push(1); pages.push('...');
+      for (let i = totalPages - 4; i <= totalPages; i++) pages.push(i);
     } else {
-      // 否則顯示部分頁碼，包含當前頁前後各2頁
-      if (currentPage <= 3) {
-        // 前幾頁
-        for (let i = 1; i <= 5; i++) {
-          pages.push(i);
-        }
-        pages.push('...');
-        pages.push(totalPages);
-      } else if (currentPage >= totalPages - 2) {
-        // 後幾頁
-        pages.push(1);
-        pages.push('...');
-        for (let i = totalPages - 4; i <= totalPages; i++) {
-          pages.push(i);
-        }
-      } else {
-        // 中間頁
-        pages.push(1);
-        pages.push('...');
-        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
-          pages.push(i);
-        }
-        pages.push('...');
-        pages.push(totalPages);
-      }
+      pages.push(1); pages.push('...');
+      for (let i = currentPage - 1; i <= currentPage + 1; i++) pages.push(i);
+      pages.push('...'); pages.push(totalPages);
     }
-    
     return pages;
   };
-  
+
   return (
-    <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
+    <div className="bg-gray-900 rounded-2xl shadow-md p-6 border border-gray-800">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <h2 className="text-2xl font-bold text-gray-100">📝 最近交易記錄</h2>
+        <h2 className="text-lg font-bold text-gray-100">📝 交易記錄</h2>
         <div className="relative w-full sm:w-64">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">🔍</span>
           <input
@@ -652,11 +874,11 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
                       {trade.tradeType === 'BUY' ? '買進' : '賣出'}
                     </span>
                   </td>
-                  <td className="text-right py-3 px-4 text-gray-200">{trade.price.toLocaleString('zh-TW')} {currencySuffix}</td>
-                  <td className="text-right py-3 px-4 text-gray-200">
+                  <td className="text-right py-3 px-4 text-gray-200 tabular-nums">{trade.price.toLocaleString('zh-TW')} {currencySuffix}</td>
+                  <td className="text-right py-3 px-4 text-gray-200 tabular-nums">
                     {trade.quantity} {trade.unit === 'SHARES' ? '股' : '張'}
                   </td>
-                  <td className="text-right py-3 px-4 font-semibold text-gray-200">
+                  <td className="text-right py-3 px-4 font-semibold text-gray-200 tabular-nums">
                     {trade.amount.toLocaleString('zh-TW')} {currencySuffix}
                   </td>
                   <td className="text-center py-3 px-4">
@@ -688,35 +910,25 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
           </tbody>
         </table>
       </div>
-      
-      {/* 分頁控件 */}
+
       {totalPages > 1 && (
         <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-sm text-gray-400">
             顯示第 {startIndex + 1} - {Math.min(endIndex, filteredTrades.length)} 筆，共 {filteredTrades.length} 筆交易記錄
           </div>
-          
           <div className="flex items-center gap-2">
-            {/* 上一頁按鈕 */}
             <button
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300 rounded-lg border border-gray-700 transition-colors text-sm font-medium"
+              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300 rounded-lg border border-gray-700 transition-colors text-sm font-medium"
             >
               ← 上一頁
             </button>
-            
-            {/* 頁碼按鈕 */}
             <div className="flex items-center gap-1">
               {getPageNumbers().map((page, index) => {
                 if (page === '...') {
-                  return (
-                    <span key={`ellipsis-${index}`} className="px-2 text-gray-500">
-                      ...
-                    </span>
-                  );
+                  return <span key={`ellipsis-${index}`} className="px-2 text-gray-500">...</span>;
                 }
-                
                 const pageNum = page as number;
                 return (
                   <button
@@ -733,12 +945,10 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
                 );
               })}
             </div>
-            
-            {/* 下一頁按鈕 */}
             <button
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={currentPage === totalPages}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300 rounded-lg border border-gray-700 transition-colors text-sm font-medium"
+              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300 rounded-lg border border-gray-700 transition-colors text-sm font-medium"
             >
               下一頁 →
             </button>
@@ -749,12 +959,18 @@ function TradesTable({ trades, onEdit, onDelete, deletingTradeId, currencySuffix
   );
 }
 
-function EmptyState() {
+function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-8 text-center">
-      <div className="text-6xl mb-4">📊</div>
+    <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-10 text-center">
+      <div className="text-5xl mb-4">📊</div>
       <h3 className="text-xl font-semibold text-gray-200 mb-2">尚無交易記錄</h3>
-      <p className="text-gray-400 mb-4">點擊下方按鈕開始記錄您的第一筆交易</p>
+      <p className="text-gray-400 mb-5">開始記錄您的第一筆交易，即可看到績效與持倉分析</p>
+      <button
+        onClick={onAdd}
+        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors"
+      >
+        ➕ 新增交易記錄
+      </button>
     </div>
   );
 }

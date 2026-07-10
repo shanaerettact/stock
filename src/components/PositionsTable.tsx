@@ -1,9 +1,8 @@
 'use client';
 
-import { useState } from 'react';
 import type { Position, StockPrice, TrailingStopResult } from '@/lib/types';
 import { calculateTrailingStop, calculateUnrealizedPnL } from '@/lib/types';
-import { DEFAULT_STOP_LOSS_PERCENT } from '@/lib/tradeCalculations';
+import { initialStopPrice } from '@/lib/tradeCalculations';
 
 // 趨勢排列圖示與顏色
 const TREND_CONFIG: Record<'多頭排列' | '空頭排列' | '盤整', { icon: string; color: string }> = {
@@ -15,211 +14,44 @@ const TREND_CONFIG: Record<'多頭排列' | '空頭排列' | '盤整', { icon: s
 interface PositionsTableProps {
   positions: Position[];
   initialCapital?: number;
-  onMessage?: (type: 'success' | 'error', text: string) => void;
   currencySuffix?: string;
-  onPositionStopLossUpdate?: (id: string, stopLossPrice: number) => void;
   activeMarket?: 'TW' | 'US';
+  /** 由上層（page）統一抓取並傳入的今日收盤價 */
+  stockPrices: Record<string, StockPrice>;
 }
 
-export default function PositionsTable({ positions, initialCapital = 100000, onMessage, currencySuffix = '元', onPositionStopLossUpdate, activeMarket = 'TW' }: PositionsTableProps) {
+export default function PositionsTable({ positions, initialCapital = 100000, currencySuffix = '元', activeMarket = 'TW', stockPrices }: PositionsTableProps) {
   const benchmarkCode = activeMarket === 'US' ? 'SPY' : '0050';
-  const [stockPrices, setStockPrices] = useState<Record<string, StockPrice>>({});
-  const [fetchingPrices, setFetchingPrices] = useState(false);
-  const [pricesFetchedAt, setPricesFetchedAt] = useState<string | null>(null);
-
   const openPositions = positions.filter(p => p.status === 'OPEN');
-  
-  // 計算總持倉成本和佔比 - 使用 totalInvested（含手續費）
+
+  // 總持倉成本（優先使用 totalInvested，含手續費）
   const totalHoldingCost = openPositions.reduce((sum, p) => {
-    // 優先使用 totalInvested（含手續費），否則用成交金額估算
     return sum + ((p as { totalInvested?: number }).totalInvested ?? (p.avgEntryPrice * p.totalQuantity));
   }, 0);
-  const holdingPercent = (totalHoldingCost / initialCapital) * 100;
-
-  const fetchStockPrices = async () => {
-    if (openPositions.length === 0) {
-      onMessage?.('error', '目前沒有持倉部位');
-      return;
-    }
-
-    try {
-      setFetchingPrices(true);
-      const stockCodes = [...new Set([...openPositions.map(p => p.stockCode), benchmarkCode])].join(',');
-      const response = await fetch(`/api/stock-price?codes=${stockCodes}`);
-
-      if (!response.ok) {
-        throw new Error('取得收盤價失敗');
-      }
-
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        const pricesMap: Record<string, StockPrice> = {};
-        result.data.forEach((price: StockPrice) => {
-          pricesMap[price.stockCode] = price;
-        });
-        setStockPrices(pricesMap);
-        setPricesFetchedAt(new Date().toLocaleTimeString('zh-TW'));
-
-        // 計算追蹤停損，若高於 DB 儲存值則更新，確保停損只升不降
-        let updatedCount = 0;
-        const savePromises = openPositions.map(async (position) => {
-          const priceData = pricesMap[position.stockCode];
-          const closingPrice = priceData?.closingPrice ?? null;
-          if (closingPrice === null) return;
-
-          const posX = position as PositionWithTrades;
-          const avgEntry = effectiveAvgEntryPrice(posX);
-          const originalStop = position.stopLossPrice ?? Math.round(avgEntry * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
-
-          const trailing = calculateTrailingStop(avgEntry, closingPrice, originalStop);
-          if (!trailing || !trailing.isActivated) return;
-
-          // 追蹤停損啟動且高於目前 DB 儲存的停損價時才更新
-          const currentDBStop = position.stopLossPrice ?? 0;
-          if (trailing.stopLossPrice > currentDBStop) {
-            try {
-              await fetch(`/api/positions?id=${position.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ stopLossPrice: trailing.stopLossPrice }),
-              });
-              onPositionStopLossUpdate?.(position.id, trailing.stopLossPrice);
-              updatedCount++;
-            } catch (err) {
-              console.warn(`${position.stockCode} 追蹤停損更新失敗:`, err);
-            }
-          }
-        });
-        await Promise.all(savePromises);
-
-        const updateMsg = updatedCount > 0 ? `，已鎖定 ${updatedCount} 檔追蹤停損` : '';
-        onMessage?.('success', `✅ 已取得今日收盤價${updateMsg}！`);
-      } else {
-        throw new Error(result.error || '取得收盤價失敗');
-      }
-    } catch (error) {
-      console.error('取得收盤價失敗:', error);
-      onMessage?.('error', error instanceof Error ? error.message : '取得收盤價失敗');
-    } finally {
-      setFetchingPrices(false);
-    }
-  };
+  const holdingPercent = initialCapital > 0 ? (totalHoldingCost / initialCapital) * 100 : 0;
 
   if (openPositions.length === 0) {
     return null;
   }
 
-  // 決定持倉佔比的顏色和等級
-  const getHoldingStatus = () => {
-    if (holdingPercent > 80) return { color: 'red', bg: 'bg-red-500', text: 'text-red-400', label: '過高', icon: '🔴' };
-    if (holdingPercent > 50) return { color: 'yellow', bg: 'bg-yellow-500', text: 'text-yellow-400', label: '偏高', icon: '🟡' };
-    if (holdingPercent > 30) return { color: 'blue', bg: 'bg-blue-500', text: 'text-blue-400', label: '適中', icon: '🔵' };
-    return { color: 'green', bg: 'bg-green-500', text: 'text-green-400', label: '安全', icon: '🟢' };
-  };
-  const holdingStatus = getHoldingStatus();
-
   return (
-    <div className="bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800">
-      {/* 標題與操作按鈕 */}
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold text-gray-100">📊 目前持倉</h2>
-        <div className="flex items-center gap-3">
-          {pricesFetchedAt && (
-            <span className="text-sm text-gray-500">更新時間：{pricesFetchedAt}</span>
-          )}
-          <button
-            onClick={fetchStockPrices}
-            disabled={fetchingPrices}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-medium rounded-lg transition-colors text-sm"
-          >
-            {fetchingPrices ? (
-              <>
-                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                取得中...
-              </>
-            ) : (
-              <>📡 取得今日收盤價</>
-            )}
-          </button>
-        </div>
+    <div className="bg-gray-900 rounded-2xl shadow-md border border-gray-800 overflow-hidden">
+      {/* 標題列（資金使用率已移至頂部 KPI，這裡僅保留精簡摘要） */}
+      <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-4 border-b border-gray-800">
+        <h2 className="text-lg font-bold text-gray-100">
+          📊 持倉部位 <span className="font-normal text-gray-500 text-sm ml-1">{openPositions.length} 檔</span>
+        </h2>
+        <span className="text-xs text-gray-500">
+          總持倉成本 {Math.round(totalHoldingCost).toLocaleString()} {currencySuffix} · 佔預算 {holdingPercent.toFixed(1)}%
+        </span>
       </div>
 
       {/* 大盤趨勢濾網 */}
       {stockPrices[benchmarkCode] && (
-        <MarketRegimeCard benchmarkCode={benchmarkCode} priceData={stockPrices[benchmarkCode]!} />
-      )}
-
-      {/* 持倉總覽 - 顯眼的佔比顯示 */}
-      <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          {/* 左側：持倉成本 */}
-          <div className="flex items-center gap-4">
-            <div>
-              <div className="text-sm text-gray-400 mb-1">總持倉成本</div>
-              <div className="text-2xl font-bold text-white">
-                {Math.round(totalHoldingCost).toLocaleString()} <span className="text-lg text-gray-400">{currencySuffix}</span>
-              </div>
-            </div>
-            <div className="text-3xl text-gray-600">|</div>
-            <div>
-              <div className="text-sm text-gray-400 mb-1">投資預算</div>
-              <div className="text-xl font-semibold text-gray-300">
-                {initialCapital.toLocaleString()} <span className="text-sm text-gray-400">{currencySuffix}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 右側：佔比圓圈 */}
-          <div className="flex items-center gap-4">
-            {/* 佔比進度條 */}
-            <div className="flex-1 md:w-48">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-sm text-gray-400">資金使用率</span>
-                <span className={`text-sm font-semibold ${holdingStatus.text}`}>
-                  {holdingStatus.icon} {holdingStatus.label}
-                </span>
-              </div>
-              <div className="h-4 bg-gray-700 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full ${holdingStatus.bg} transition-all duration-700 ease-out`}
-                  style={{ width: `${Math.min(holdingPercent, 100)}%` }}
-                />
-              </div>
-            </div>
-
-            {/* 佔比數字 */}
-            <div className={`text-center px-4 py-2 rounded-xl border-2 ${
-              holdingPercent > 80 ? 'border-red-500 bg-red-900/30' :
-              holdingPercent > 50 ? 'border-yellow-500 bg-yellow-900/30' :
-              holdingPercent > 30 ? 'border-blue-500 bg-blue-900/30' :
-              'border-green-500 bg-green-900/30'
-            }`}>
-              <div className={`text-3xl font-bold ${holdingStatus.text}`}>
-                {holdingPercent.toFixed(1)}%
-              </div>
-              <div className="text-xs text-gray-400">佔投資預算</div>
-            </div>
-          </div>
+        <div className="px-5 pt-4">
+          <MarketRegimeCard benchmarkCode={benchmarkCode} priceData={stockPrices[benchmarkCode]!} />
         </div>
-
-        {/* 風險提示 */}
-        {holdingPercent > 50 && (
-          <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${
-            holdingPercent > 80 
-              ? 'bg-red-900/40 border border-red-700 text-red-300'
-              : 'bg-yellow-900/40 border border-yellow-700 text-yellow-300'
-          }`}>
-            {holdingPercent > 80 
-              ? '⚠️ 持倉比例過高！建議適度減倉以降低風險'
-              : '💡 持倉比例偏高，請注意資金配置與風險控管'
-            }
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full">
@@ -251,11 +83,19 @@ export default function PositionsTable({ positions, initialCapital = 100000, onM
       </div>
 
       {Object.keys(stockPrices).length > 0 && (
-        <div className="mt-4 text-xs text-gray-500 text-right">
+        <div className="px-5 pb-4 pt-3 text-xs text-gray-500 text-right">
           資料來源：
-          <a href="https://openapi.twse.com.tw/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline ml-1">TWSE OpenAPI</a>
-          {'、'}
-          <a href="https://finmind.github.io/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">FinMind API</a>
+          {activeMarket === 'US' ? (
+            <a href="https://finance.yahoo.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline ml-1">Yahoo Finance（即時報價與歷史日線）</a>
+          ) : (
+            <>
+              <a href="https://openapi.twse.com.tw/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline ml-1">TWSE OpenAPI（上市）</a>
+              {'、'}
+              <a href="https://www.tpex.org.tw/openapi/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">TPEX OpenAPI（上櫃）</a>
+              {'、'}
+              <a href="https://finance.yahoo.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Yahoo Finance（歷史／備援）</a>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -267,7 +107,7 @@ type PositionWithTrades = Position & {
   trades?: Array<{ tradeType: string; quantity: number; amount: number; unit: string; price: number }>;
 };
 
-function effectiveAvgEntryPrice(position: PositionWithTrades): number {
+export function effectiveAvgEntryPrice(position: Position): number {
   if (position.market !== 'US' || !position.trades?.length) {
     return position.avgEntryPrice;
   }
@@ -292,8 +132,7 @@ function PositionRow({ position, priceData, initialCapital, currencySuffix = '�
   const closingPrice = priceData?.closingPrice;
   const change = priceData?.change;
   
-  const originalStopLoss = position.stopLossPrice ||
-    Math.round(avgEntry * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
+  const originalStopLoss = position.stopLossPrice || initialStopPrice(avgEntry);
   
   const trailingStop = calculateTrailingStop(
     avgEntry,
@@ -311,10 +150,23 @@ function PositionRow({ position, priceData, initialCapital, currencySuffix = '�
   const positionCost = (position as { totalInvested?: number }).totalInvested ?? (position.avgEntryPrice * position.totalQuantity);
   const positionPercent = (positionCost / initialCapital) * 100;
 
+  // 嚴重度色條：停損觸發→紅、弱勢/空頭→黃、新高/多頭/追蹤中→綠、其餘→灰
+  const severity: 'crit' | 'warn' | 'ok' | 'none' = trailingStop?.isTriggered
+    ? 'crit'
+    : priceData?.rsLabel === '弱於大盤' || priceData?.trendAlignment === '空頭排列'
+      ? 'warn'
+      : priceData?.is52WeekHigh || priceData?.trendAlignment === '多頭排列' || trailingStop?.isActivated
+        ? 'ok'
+        : 'none';
+  const railColor = { crit: 'bg-red-500', warn: 'bg-amber-500', ok: 'bg-green-500', none: 'bg-gray-700' }[severity];
+
   return (
     <tr className="border-b border-gray-800 hover:bg-gray-800/50">
-      {/* 股票資訊 */}
+      {/* 股票資訊（含嚴重度色條） */}
       <td className="py-3 px-4">
+       <div className="flex items-stretch gap-3">
+        <span className={`w-1 rounded-full flex-none ${railColor}`} aria-hidden="true" />
+        <div>
         <div className="flex items-center gap-2">
           <span className="font-semibold text-gray-200">{position.stockCode}</span>
           <a
@@ -369,6 +221,8 @@ function PositionRow({ position, priceData, initialCapital, currencySuffix = '�
             <TrendBadge trendAlignment={priceData.trendAlignment} ma20={priceData.ma20} ma50={priceData.ma50} ma200={priceData.ma200} />
           </div>
         )}
+        </div>
+       </div>
       </td>
 
       {/* 股數 */}

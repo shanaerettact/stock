@@ -111,6 +111,12 @@ model Position {
   notes             String?      // 備註（可重複編輯）
   setupType         String?      // 進場訊號標籤
 
+  // 進場當下的指標快照（趨勢交易復盤用；買進建立部位時寫入，best-effort）
+  rsAtEntry             Float?    // 進場時相對強度 RS（個股 - 大盤 報酬%）
+  trendAtEntry          String?   // 進場時均線排列：多頭排列 / 空頭排列 / 盤整
+  pctFrom52wHighAtEntry Float?    // 進場時距 52 週高的百分比（0 = 剛好新高，負值 = 低於高點）
+  volRatioAtEntry       Float?    // 進場時量比（當日量 / 50 日均量）
+
   trades            Trade[]
   
   createdAt         DateTime     @default(now())

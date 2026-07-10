@@ -88,46 +88,47 @@ export default function AIAnalysisModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}
+      className="modal-overlay-in fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-gray-900 rounded-xl shadow-2xl border border-gray-700 w-full max-w-3xl flex flex-col"
+      <div className="modal-panel-in bg-gray-900 rounded-2xl shadow-2xl border border-gray-700 w-full max-w-3xl flex flex-col"
         style={{ maxHeight: '90vh' }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 flex-shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-2xl">🤖</span>
             <div>
-              <h2 className="text-xl font-bold text-gray-100">AI 交易分析</h2>
-              <p className="text-xs text-gray-400">由 Claude AI 分析您的交易記錄並提供改善建議</p>
+              <h2 className="text-xl font-bold text-gray-100 tracking-tight">AI 交易分析</h2>
+              <p className="text-xs text-gray-500">由 AI 分析您的交易記錄並提供改善建議</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-200 transition-colors p-1 rounded-lg hover:bg-gray-800"
+            aria-label="關閉"
+            className="text-gray-400 hover:text-gray-100 transition-colors p-2 rounded-lg hover:bg-gray-800"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 px-6 pt-4 flex-shrink-0">
+        {/* Tabs（底線式，與儀表板一致） */}
+        <div className="flex gap-1 px-6 pt-3 flex-shrink-0 border-b border-gray-800">
           {(['TW', 'US'] as const).map((m) => (
             <button
               key={m}
               onClick={() => setActiveTab(m)}
-              className={`px-5 py-2 rounded-t-lg font-medium text-sm transition-colors ${
+              aria-selected={activeTab === m}
+              className={`px-4 py-2.5 -mb-px font-semibold text-sm border-b-2 transition-colors ${
                 activeTab === m
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'
+                  ? 'text-gray-100 border-blue-500'
+                  : 'text-gray-400 border-transparent hover:text-gray-200'
               }`}
             >
               {m === 'TW' ? '🇹🇼 台股分析' : '🇺🇸 美股分析'}
-              <span className="ml-2 text-xs opacity-70">
-                ({(m === 'TW' ? twTrades : usTrades).length} 筆)
+              <span className="ml-1.5 text-xs text-gray-500">
+                {(m === 'TW' ? twTrades : usTrades).length}
               </span>
             </button>
           ))}
@@ -318,7 +319,7 @@ function MarkdownTable({ lines }: { lines: string[] }) {
         </thead>
         <tbody>
           {body.map((row, ri) => (
-            <tr key={ri} className={ri % 2 === 0 ? 'bg-gray-900' : 'bg-gray-850'}>
+            <tr key={ri} className={ri % 2 === 0 ? 'bg-gray-900' : 'bg-gray-800/40'}>
               {row.map((cell, ci) => (
                 <td key={ci} className="px-3 py-2 text-gray-300 border border-gray-800">
                   {cell}

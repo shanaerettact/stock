@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { initialStopPrice } from '@/lib/tradeCalculations';
 
 /**
  * 將交易數量轉換為股數
@@ -68,15 +69,19 @@ async function recalculatePosition(positionId: string) {
       : 0;
 
   // 根據買入資訊計算停損
-  // 停損價 = 成本價 × 92%（容忍 8% 虧損）
-  // 預計停損金額 = (成本價 - 停損價) × 總買入股數 = 成本價 × 8% × 總買入股數
+  // 初始停損價 = 成本價 × 92%（容忍 8% 虧損）；作為 R 值分母的「初始風險」基準
+  // 預計停損金額 = (成本價 - 初始停損價) × 總買入股數 = 成本價 × 8% × 總買入股數
   let stopLossPrice = position?.stopLossPrice;
   let plannedStopLoss = position?.plannedStopLoss;
-  
-  // 總是重新計算停損金額（使用實際買入股數，不是剩餘股數）
+
   if (avgEntryPrice > 0 && totalBuyQuantity > 0) {
-    stopLossPrice = Math.round(avgEntryPrice * 0.92 * 100) / 100;
-    plannedStopLoss = Math.round((avgEntryPrice - stopLossPrice) * totalBuyQuantity);
+    const baseStop = initialStopPrice(avgEntryPrice);
+    // 🔧 保留追蹤停損「只升不降」：重算時不得把已往上鎖的停損打回初始 8%
+    // （原本無條件覆蓋為 baseStop，會抹掉追蹤停損；改為取較高者）
+    stopLossPrice =
+      position?.stopLossPrice != null ? Math.max(position.stopLossPrice, baseStop) : baseStop;
+    // R 值分母仍以「初始風險」計（進場 8%），不隨追蹤停損變動
+    plannedStopLoss = Math.round((avgEntryPrice - baseStop) * totalBuyQuantity);
   }
 
   // 計算賣出交易（將數量轉換為股數）

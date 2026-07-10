@@ -6,7 +6,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { calculateTrade, calculatePositionSize, DEFAULT_STOP_LOSS_PERCENT, type TradeUnit } from '@/lib/tradeCalculations';
+import { calculateTrade, calculatePositionSize, DEFAULT_STOP_LOSS_PERCENT, initialStopPrice, type TradeUnit } from '@/lib/tradeCalculations';
 import { getStockNameByCode, getStockCodeByName } from '@/data/stockList';
 import { SETUP_TYPES } from '@/lib/types';
 
@@ -186,7 +186,7 @@ export default function TradeForm({
       });
       setPreview(calculation);
       
-      const autoStopLossPrice = Math.round(price * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
+      const autoStopLossPrice = initialStopPrice(price);
       const totalShares = isUS ? quantity : (formData.unit === 'LOTS' ? quantity * 1000 : quantity);
       const stopLossAmount = Math.round((price - autoStopLossPrice) * totalShares);
       

@@ -66,6 +66,56 @@ export function convertToShares(quantity: number, unit: TradeUnit, market: Marke
   return unit === 'LOTS' ? quantity * SHARES_PER_LOT : quantity;
 }
 
+// ===== 未平倉部位成本拆解（部分平倉） =====
+
+/**
+ * DB 的 totalInvested 存「歷史總投入」（全部買進成本），部位部分賣出後
+ * 直接拿它當持倉成本會高估（賣掉的股份成本仍被計入）。
+ * 此 helper 依部位交易明細拆出：
+ * - remainingCost：尚未賣出股數對應的買入成本（買入手續費按比例分攤）
+ * - partialRealizedPnL：部分賣出的已實現損益 = 賣出淨入 − 賣出股數對應的買入成本
+ * 資產核對恆等式：餘額 + Σ remainingCost = 投資預算 + 已平倉損益 + Σ partialRealizedPnL
+ */
+export interface OpenPositionCost {
+  remainingCost: number;
+  partialRealizedPnL: number;
+}
+
+export function openPositionCost(position: {
+  market?: string;
+  avgEntryPrice: number;
+  totalQuantity: number;
+  totalInvested?: number;
+  trades?: Array<{ tradeType: string; quantity: number; unit: string; amount?: number; commission?: number; tax?: number }>;
+}): OpenPositionCost {
+  const fallback = position.totalInvested ?? position.avgEntryPrice * position.totalQuantity;
+  const trades = position.trades;
+  if (!trades?.length) return { remainingCost: fallback, partialRealizedPnL: 0 };
+
+  const m: MarketRegion = position.market === 'US' ? 'US' : 'TW';
+  let buyQty = 0;
+  let buyCost = 0;
+  let sellQty = 0;
+  let sellNet = 0;
+  for (const t of trades) {
+    const shares = convertToShares(t.quantity, (t.unit as TradeUnit) || 'SHARES', m);
+    if (t.tradeType === 'BUY') {
+      buyQty += shares;
+      buyCost += (t.amount ?? 0) + (t.commission ?? 0);
+    } else if (t.tradeType === 'SELL') {
+      sellQty += shares;
+      sellNet += (t.amount ?? 0) - (t.commission ?? 0) - (t.tax ?? 0);
+    }
+  }
+  // 交易明細缺金額欄位（舊資料）時退回原本估算
+  if (buyQty <= 0 || buyCost <= 0) return { remainingCost: fallback, partialRealizedPnL: 0 };
+  if (sellQty <= 0) return { remainingCost: buyCost, partialRealizedPnL: 0 };
+
+  const soldRatio = Math.min(sellQty / buyQty, 1);
+  const costOfSold = buyCost * soldRatio;
+  return { remainingCost: buyCost - costOfSold, partialRealizedPnL: sellNet - costOfSold };
+}
+
 /**
  * 計算成交金額
  * @param price 每股價格

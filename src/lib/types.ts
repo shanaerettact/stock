@@ -59,6 +59,10 @@ export interface Position {
     quantity: number;
     unit: string;
     tradeDate: string;
+    // /api/positions include trades 時會帶完整欄位（部分平倉成本拆解需要）
+    amount?: number;
+    commission?: number;
+    tax?: number;
   }>;
 }
 
@@ -88,6 +92,9 @@ export interface StockPrice {
   rsValue?: number | null;
   rsLabel?: '強於大盤' | '弱於大盤' | null;
   benchmarkCode?: string | null;
+  // 報價來源標示（備援時 UI 需明確標示）
+  sourceUsed?: 'TWSE' | 'TPEX' | 'Yahoo' | null;
+  isFallbackSource?: boolean;
 }
 
 // ===== 追蹤停損相關 =====

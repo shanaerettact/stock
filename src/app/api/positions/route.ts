@@ -69,6 +69,19 @@ export async function PATCH(request: NextRequest) {
     if ('setupType' in body) {
       updateData.setupType = typeof body.setupType === 'string' && body.setupType ? body.setupType : null;
     }
+    // 進場指標快照（僅接受數值 / 趨勢字串）
+    if ('rsAtEntry' in body) {
+      updateData.rsAtEntry = typeof body.rsAtEntry === 'number' && Number.isFinite(body.rsAtEntry) ? body.rsAtEntry : null;
+    }
+    if ('trendAtEntry' in body) {
+      updateData.trendAtEntry = typeof body.trendAtEntry === 'string' && body.trendAtEntry ? body.trendAtEntry : null;
+    }
+    if ('pctFrom52wHighAtEntry' in body) {
+      updateData.pctFrom52wHighAtEntry = typeof body.pctFrom52wHighAtEntry === 'number' && Number.isFinite(body.pctFrom52wHighAtEntry) ? body.pctFrom52wHighAtEntry : null;
+    }
+    if ('volRatioAtEntry' in body) {
+      updateData.volRatioAtEntry = typeof body.volRatioAtEntry === 'number' && Number.isFinite(body.volRatioAtEntry) ? body.volRatioAtEntry : null;
+    }
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: '沒有可更新的欄位' }, { status: 400 });

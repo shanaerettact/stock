@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Skill(claude-api)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "PowerShell($key = \\(Get-Content \"C:\\\\Users\\\\move_on\\\\Pictures\\\\奶爸\\\\stock\\\\.env.local\"\\) -replace \"GOOGLE_API_KEY=\", \"\"; $key = $key.Trim\\(\\); $res = Invoke-RestMethod -Uri \"https://generativelanguage.googleapis.com/v1beta/models?key=$key\"; $res.models | Select-Object -ExpandProperty name | Select-Object -First 20)",
+      "WebFetch(domain:www.tpex.org.tw)",
+      "Bash(echo \"EXIT:$?\")",
+      "Skill(artifact-design)",
+      "Artifact",
+      "Bash(npx prisma *)"
+    ]
+  }
+}

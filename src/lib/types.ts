@@ -49,6 +49,10 @@ export interface Position {
   avgExitPrice?: number | null;      // 平均賣出價
   notes?: string | null;             // 備註
   setupType?: string | null;         // 進場訊號標籤
+  rsAtEntry?: number | null;             // 進場時 RS
+  trendAtEntry?: string | null;          // 進場時均線排列
+  pctFrom52wHighAtEntry?: number | null; // 進場時距 52 週高 %
+  volRatioAtEntry?: number | null;       // 進場時量比
   trades?: Array<{
     tradeType: string;
     price: number;

@@ -37,6 +37,21 @@ body {
   background: #555;
 }
 
+/* 彈窗進場動畫（尊重 reduce-motion） */
+@keyframes modalOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modalPanelIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-overlay-in { animation: modalOverlayIn 0.18s ease-out both; }
+.modal-panel-in { animation: modalPanelIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay-in, .modal-panel-in { animation: none; }
+}
+
 /* 輔助類別 */
 @layer components {
   .btn-primary {

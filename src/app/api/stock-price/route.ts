@@ -408,7 +408,19 @@ async function fetchHistory(
  * 快取讓「首次稍等、之後秒開」。TTL 內同一 (代號,區間,市場) 直接回傳。
  */
 const HISTORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10 分鐘
-const historyCache = new Map<string, { ts: number; value: HistoryFetchResult }>();
+// 以 (代號,市場) 為鍵、保存已抓取的最大日期區間；請求落在區間內時直接切片回傳，
+// 讓單檔圖表（往前 300 天）與批次指標（52 週）兩條路徑共用同一份外部抓取結果
+const historyCache = new Map<
+  string,
+  { ts: number; startDate: string; endDate: string; value: HistoryFetchResult }
+>();
+
+function sliceHistory(value: HistoryFetchResult, startDate: string, endDate: string): HistoryFetchResult {
+  return {
+    ...value,
+    history: value.history.filter(d => d.date >= startDate && d.date <= endDate),
+  };
+}
 
 async function getHistoryCached(
   stockCode: string,
@@ -416,20 +428,29 @@ async function getHistoryCached(
   endDate: string,
   market: '上市' | '上櫃' | null
 ): Promise<HistoryFetchResult> {
-  const key = `${stockCode}|${startDate}|${endDate}|${market ?? ''}`;
+  const key = `${stockCode}|${market ?? ''}`;
   const now = Date.now();
   const hit = historyCache.get(key);
-  if (hit && now - hit.ts < HISTORY_CACHE_TTL_MS && hit.value.history.length > 0) {
-    return hit.value;
+  if (
+    hit &&
+    now - hit.ts < HISTORY_CACHE_TTL_MS &&
+    hit.value.history.length > 0 &&
+    hit.startDate <= startDate &&
+    hit.endDate >= endDate
+  ) {
+    return sliceHistory(hit.value, startDate, endDate);
   }
-  const value = await fetchHistory(stockCode, startDate, endDate, market);
-  historyCache.set(key, { ts: now, value });
+  // 未命中時抓涵蓋新舊需求的聯集區間，讓快取條目只會擴大、後續請求更容易命中
+  const fetchStart = hit && hit.startDate < startDate ? hit.startDate : startDate;
+  const fetchEnd = hit && hit.endDate > endDate ? hit.endDate : endDate;
+  const value = await fetchHistory(stockCode, fetchStart, fetchEnd, market);
+  historyCache.set(key, { ts: now, startDate: fetchStart, endDate: fetchEnd, value });
   // 避免無上限成長：超過 500 筆時清掉最舊的一批
   if (historyCache.size > 500) {
     const oldest = [...historyCache.entries()].sort((a, b) => a[1].ts - b[1].ts).slice(0, 100);
     for (const [k] of oldest) historyCache.delete(k);
   }
-  return value;
+  return sliceHistory(value, startDate, endDate);
 }
 
 // 取得 52 周日期範圍（today - 365 天 ~ today）
@@ -582,9 +603,9 @@ export async function GET(request: NextRequest) {
         console.warn(`[歷史日線無資料] 代碼=${code} 市場=${market ?? '未知'} 已嘗試=${sourcesTried.join(',')}`);
       }
 
-      // 判斷是否為備援來源：上市預期 TWSE、上櫃預期 TPEX、其餘（含未知）預期主來源以外皆視為備援
-      const primarySource: FetchSource | null =
-        market === '上市' ? 'TWSE' : market === '上櫃' ? 'TPEX' : null;
+      // 判斷是否為備援來源：實際命中的來源不是嘗試順序的第一個（該市場的主來源）即視為備援
+      // 由 fetchHistory 的 sourcesTried 推導，市場未知時也能正確標示（未知市場最容易 fallback）
+      const primarySource = sourcesTried[0] ?? null;
       const isFallbackSource =
         sourceUsed != null && primarySource != null && sourceUsed !== primarySource;
 

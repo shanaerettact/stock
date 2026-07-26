@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { initialStopPrice } from '@/lib/tradeCalculations';
 
 /**
  * 將交易數量轉換為股數
@@ -74,7 +75,7 @@ async function recalculatePosition(positionId: string) {
   let plannedStopLoss = position?.plannedStopLoss;
 
   if (avgEntryPrice > 0 && totalBuyQuantity > 0) {
-    const baseStop = Math.round(avgEntryPrice * 0.92 * 100) / 100;
+    const baseStop = initialStopPrice(avgEntryPrice);
     // 🔧 保留追蹤停損「只升不降」：重算時不得把已往上鎖的停損打回初始 8%
     // （原本無條件覆蓋為 baseStop，會抹掉追蹤停損；改為取較高者）
     stopLossPrice =

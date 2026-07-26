@@ -6,10 +6,11 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, BarChart, Bar, Cell,
 } from 'recharts';
 import { SETUP_TYPES, type Trade, type Position } from '@/lib/types';
+import { openPositionCost } from '@/lib/tradeCalculations';
 import { getStockMarketByCode } from '@/data/stockList';
 import {
-  type ClosedPosition,
   type PerformanceMetrics,
+  toClosedPosition,
   getPyramidType,
   analyzeBySetupType,
   analyzePyramiding,
@@ -175,16 +176,6 @@ function EntrySnapshot({ position }: { position: Position }) {
       )}
     </div>
   );
-}
-
-function toClosedPosition(p: Position & { holdingDays?: number | null }): ClosedPosition {
-  return {
-    totalPnL: p.totalPnL ?? 0,
-    returnRate: p.returnRate ?? 0,
-    rValue: p.rValue,
-    holdingDays: p.holdingDays ?? 0,
-    exitDate: p.exitDate ? new Date(p.exitDate) : new Date(),
-  };
 }
 
 interface DataModalProps {
@@ -921,13 +912,14 @@ export default function DataModal({
         // 賣出總收入（成交金額 - 手續費 - 交易稅）
         const totalSellIncome = sellTrades.reduce((sum, t) => sum + t.amount - t.commission - t.tax, 0);
         
-        // 持倉成本（開倉部位）- 使用 totalInvested（含手續費）
+        // 持倉成本（開倉部位）：以「尚未賣出股數」的成本計算。
+        // 部分平倉的部位若直接用 totalInvested（歷史總投入）會高估持倉、造成資產核對失衡
         const openPositions = positions.filter(p => p.status === 'OPEN');
-        // 優先使用 totalInvested（含手續費），否則用成交金額估算
-        const holdingCost = openPositions.reduce((sum, p) => {
-          return sum + (p.totalInvested ?? (p.avgEntryPrice * p.totalQuantity));
-        }, 0);
-        
+        const openCosts = openPositions.map(p => openPositionCost(p));
+        const holdingCost = openCosts.reduce((sum, c) => sum + c.remainingCost, 0);
+        // 未平倉部位「部分賣出」的已實現損益（例：買 32 股先賣 16 股）
+        const partialRealizedPnL = openCosts.reduce((sum, c) => sum + c.partialRealizedPnL, 0);
+
         // 已實現損益（已平倉部位）
         const closedPositions = positions.filter(p => p.status === 'CLOSED');
         const realizedPnL = closedPositions.reduce((sum, p) => sum + (p.totalPnL || 0), 0);
@@ -1114,9 +1106,9 @@ export default function DataModal({
 
             {/* 資產平衡核對 - 餘額 + 持倉 = 投資預算 + 損益 */}
             {(() => {
-              // 資產平衡公式：當前餘額 + 持倉成本 = 投資預算 + 已實現損益
+              // 資產平衡公式：當前餘額 + 持倉成本（剩餘股數） = 投資預算 + 已平倉損益 + 部分平倉損益
               const totalAssets = accountBalance + holdingCost;
-              const expectedAssets = initialCapital + realizedPnL;
+              const expectedAssets = initialCapital + realizedPnL + partialRealizedPnL;
               const assetsDiff = Math.round((totalAssets - expectedAssets) * 100) / 100;
               const isAssetsMatch = Math.abs(assetsDiff) < 1;
               
@@ -1160,6 +1152,14 @@ export default function DataModal({
                           {realizedPnL >= 0 ? '+' : ''}{Math.round(realizedPnL).toLocaleString()}
                         </span>
                       </div>
+                      {Math.abs(partialRealizedPnL) >= 1 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400" title="未平倉部位先賣出部分股數的已實現損益">+ 部分平倉損益</span>
+                          <span className={partialRealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}>
+                            {partialRealizedPnL >= 0 ? '+' : ''}{Math.round(partialRealizedPnL).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-semibold border-t border-gray-700 pt-1">
                         <span className="text-gray-300">= 預期總資產</span>
                         <span className="text-white">{Math.round(expectedAssets).toLocaleString()} {currencyUnit}</span>
@@ -1169,7 +1169,7 @@ export default function DataModal({
                   
                   {isAssetsMatch ? (
                     <div className="mt-3 text-xs text-green-400">
-                      ✓ 資產平衡正確：餘額 + 持倉成本 = 投資預算 + 已實現損益
+                      ✓ 資產平衡正確：餘額 + 持倉成本 = 投資預算 + 已實現損益（含部分平倉）
                     </div>
                   ) : (
                     <div className="mt-3 p-2 bg-red-900/30 rounded text-xs text-red-300">

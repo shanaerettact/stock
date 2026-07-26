@@ -6,7 +6,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { calculateTrade, calculatePositionSize, DEFAULT_STOP_LOSS_PERCENT, type TradeUnit } from '@/lib/tradeCalculations';
+import { calculateTrade, calculatePositionSize, DEFAULT_STOP_LOSS_PERCENT, initialStopPrice, type TradeUnit } from '@/lib/tradeCalculations';
 import { getStockNameByCode, getStockCodeByName } from '@/data/stockList';
 import { SETUP_TYPES } from '@/lib/types';
 
@@ -186,7 +186,7 @@ export default function TradeForm({
       });
       setPreview(calculation);
       
-      const autoStopLossPrice = Math.round(price * (1 - DEFAULT_STOP_LOSS_PERCENT) * 100) / 100;
+      const autoStopLossPrice = initialStopPrice(price);
       const totalShares = isUS ? quantity : (formData.unit === 'LOTS' ? quantity * 1000 : quantity);
       const stopLossAmount = Math.round((price - autoStopLossPrice) * totalShares);
       
@@ -334,53 +334,43 @@ export default function TradeForm({
       : null;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl mx-auto p-6 bg-gray-900 rounded-lg shadow-md border border-gray-800">
+    <form onSubmit={handleSubmit} className={embedded ? 'space-y-5' : 'space-y-5 max-w-2xl mx-auto p-6 bg-surface rounded-2xl shadow-md border border-line'}>
       {!embedded && (
-        <h2 className="text-2xl font-bold text-gray-100 mb-6">
+        <h2 className="text-2xl font-bold text-ink mb-6">
           {submitLabel}
         </h2>
       )}
-      
+
       {/* 錯誤訊息 */}
       {errors.general && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded">
+        <div className="bg-up-soft border border-up-edge text-up px-4 py-3 rounded-lg text-sm">
           {errors.general}
         </div>
       )}
-      
+
       {/* 交易類型 */}
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-2">
-          交易類型 *
-        </label>
-        <div className="flex gap-4">
-          <label className="flex items-center">
-            <input
-              type="radio"
-              value="BUY"
-              checked={formData.tradeType === 'BUY'}
-              onChange={(e) => handleChange('tradeType', e.target.value)}
-              className="mr-2"
-            />
-            <span className="text-green-400 font-semibold">買進</span>
-          </label>
-          <label className="flex items-center">
-            <input
-              type="radio"
-              value="SELL"
-              checked={formData.tradeType === 'SELL'}
-              onChange={(e) => handleChange('tradeType', e.target.value)}
-              className="mr-2"
-            />
-            <span className="text-red-400 font-semibold">賣出</span>
-          </label>
-        </div>
+      <div className="grid grid-cols-2 gap-2" role="group" aria-label="交易類型">
+        {(['BUY', 'SELL'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => handleChange('tradeType', t)}
+            aria-pressed={formData.tradeType === t}
+            className={`py-2 rounded-lg text-sm font-bold border transition-colors ${
+              formData.tradeType === t
+                ? 'text-accent bg-accent-soft border-accent-edge'
+                : 'text-ink-3 bg-raised border-line hover:text-ink-2'
+            }`}
+          >
+            {t === 'BUY' ? '買進' : '賣出'}
+          </button>
+        ))}
       </div>
       
       {/* 股票資訊 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-ink-2 mb-2">
             股票代號 *
           </label>
           <input
@@ -388,24 +378,24 @@ export default function TradeForm({
             value={formData.stockCode}
             onChange={(e) => handleChange('stockCode', e.target.value)}
             placeholder={isUS ? '例如：AAPL' : '例如：2330（會自動帶出名稱）'}
-            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-gray-800 text-gray-100 ${
+            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-raised text-ink ${
               errors.stockCode
                 ? 'border-red-600 focus:ring-red-500'
-                : 'border-gray-600 focus:ring-blue-500'
+                : 'border-line focus:ring-accent'
             }`}
           />
           {errors.stockCode && (
             <p className="mt-1 text-sm text-red-400">{errors.stockCode}</p>
           )}
           {formData.stockName && (
-            <p className="mt-1 text-xs text-green-400">
+            <p className="mt-1 text-xs text-down">
               ✓ {formData.stockName}
             </p>
           )}
         </div>
         
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-ink-2 mb-2">
             股票名稱
           </label>
           <input
@@ -413,10 +403,10 @@ export default function TradeForm({
             value={formData.stockName}
             onChange={(e) => handleChange('stockName', e.target.value)}
             placeholder={isUS ? '例如：Apple Inc.' : '例如：台積電（會自動帶出代號）'}
-            className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+            className="w-full px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink"
           />
           {formData.stockCode && formData.stockName && (
-            <p className="mt-1 text-xs text-green-400">
+            <p className="mt-1 text-xs text-down">
               ✓ {formData.stockCode}
             </p>
           )}
@@ -426,13 +416,13 @@ export default function TradeForm({
       {/* 進場訊號類型（僅新部位適用） */}
       {formData.tradeType === 'BUY' && !formData.positionId && (
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-ink-2 mb-2">
             進場訊號類型
           </label>
           <select
             value={formData.setupType || ''}
             onChange={(e) => handleChange('setupType', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+            className="w-full px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink"
           >
             <option value="">不標記</option>
             {SETUP_TYPES.map((type) => (
@@ -444,21 +434,21 @@ export default function TradeForm({
 
       {/* 交易日期 */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-ink-2 mb-2">
           交易日期 *
         </label>
         <input
           type="date"
           value={formData.tradeDate}
           onChange={(e) => handleChange('tradeDate', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+          className="w-full px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink"
         />
       </div>
       
       {/* 價格與數量 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-ink-2 mb-2">
             成交價格（每股）*
           </label>
           <div className="relative">
@@ -468,13 +458,13 @@ export default function TradeForm({
               value={formData.price}
               onChange={(e) => handleChange('price', e.target.value)}
               placeholder="0.00"
-              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-gray-800 text-gray-100 ${
+              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-raised text-ink ${
                 errors.price
                   ? 'border-red-600 focus:ring-red-500'
-                  : 'border-gray-600 focus:ring-blue-500'
+                  : 'border-line focus:ring-accent'
               }`}
             />
-            <span className="absolute right-3 top-2 text-gray-400">{priceSuffix}</span>
+            <span className="absolute right-3 top-2 text-ink-3">{priceSuffix}</span>
           </div>
           {errors.price && (
             <p className="mt-1 text-sm text-red-400">{errors.price}</p>
@@ -482,7 +472,7 @@ export default function TradeForm({
         </div>
         
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-ink-2 mb-2">
             數量 *
           </label>
           <div className="flex gap-2">
@@ -490,7 +480,7 @@ export default function TradeForm({
             <select
               value={formData.unit}
               onChange={(e) => handleChange('unit', e.target.value as TradeUnit)}
-              className="w-24 px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+              className="w-24 px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink"
             >
               <option value="SHARES">零股</option>
               <option value="LOTS">張</option>
@@ -507,13 +497,13 @@ export default function TradeForm({
                 onChange={(e) => handleChange('quantity', e.target.value)}
                 onWheel={(e) => e.currentTarget.blur()}
                 placeholder={isUS ? '10' : (formData.unit === 'SHARES' ? '100' : '1')}
-                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-gray-800 text-gray-100 ${
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-raised text-ink ${
                   errors.quantity
                     ? 'border-red-600 focus:ring-red-500'
-                    : 'border-gray-600 focus:ring-blue-500'
+                    : 'border-line focus:ring-accent'
                 }`}
               />
-              <span className="absolute right-3 top-2 text-gray-400">
+              <span className="absolute right-3 top-2 text-ink-3">
                 {isUS ? '股' : (formData.unit === 'SHARES' ? '股' : '張')}
               </span>
             </div>
@@ -522,18 +512,18 @@ export default function TradeForm({
             <p className="mt-1 text-sm text-red-400">{errors.quantity}</p>
           )}
           {!isUS && formData.unit === 'SHARES' && (
-            <p className="mt-1 text-xs text-blue-400">
-              💡 零股單位為「股」，1 張 = 1000 股
+            <p className="mt-1 text-xs text-accent">
+              零股單位為「股」，1 張 = 1000 股
             </p>
           )}
           {!isUS && formData.unit === 'LOTS' && (
-            <p className="mt-1 text-xs text-blue-400">
-              💡 整張單位為「張」，1 張 = 1000 股
+            <p className="mt-1 text-xs text-accent">
+              整張單位為「張」，1 張 = 1000 股
             </p>
           )}
           {isUS && (
-            <p className="mt-1 text-xs text-blue-400">
-              💡 美股以「股」為單位；手續費試算為成交額 0.1%（每筆最高 1 美元），賣出另含簡化規費
+            <p className="mt-1 text-xs text-accent">
+              美股以「股」為單位；手續費試算為成交額 0.1%（每筆最高 1 美元），賣出另含簡化規費
             </p>
           )}
         </div>
@@ -541,11 +531,11 @@ export default function TradeForm({
 
       {/* 部位試算（風險管理） */}
       {formData.tradeType === 'BUY' && formData.price && (
-        <div className="bg-gray-800 border border-gray-700 rounded-md p-4">
-          <h3 className="font-semibold text-blue-400 mb-3">📐 部位試算（風險管理）</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+        <div className="bg-raised border border-line-soft rounded-xl p-4">
+          <h3 className="text-[11px] font-bold tracking-[.1em] text-ink-3 mb-3">部位試算（風險管理）</h3>
+          <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-ink-2 mb-2">
                 停損比例 (%)
               </label>
               <input
@@ -554,11 +544,11 @@ export default function TradeForm({
                 min="0"
                 value={sizingStopPercentInput}
                 onChange={(e) => setSizingStopPercentInput(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+                className="w-full px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-ink-2 mb-2">
                 可承受風險金額（{priceSuffix}）
               </label>
               <input
@@ -569,32 +559,32 @@ export default function TradeForm({
                 onChange={(e) => setSizingRiskAmountInput(e.target.value)}
                 onWheel={(e) => e.currentTarget.blur()}
                 placeholder="例如：5000"
-                className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+                className="w-full px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink"
               />
             </div>
           </div>
 
           {positionSizeResult ? (
             <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-              <div className="text-gray-400">建議停損價：</div>
+              <div className="text-ink-3">建議停損價：</div>
               <div className="font-semibold text-right text-red-400">
                 {positionSizeResult.stopLossPrice.toLocaleString('zh-TW')} {priceSuffix}
               </div>
-              <div className="text-gray-400">每股風險：</div>
-              <div className="font-semibold text-right text-orange-400">
+              <div className="text-ink-3">每股風險：</div>
+              <div className="font-semibold text-right text-warn">
                 {positionSizeResult.riskPerShare.toLocaleString('zh-TW')} {priceSuffix}
               </div>
-              <div className="text-gray-400">建議買入數量：</div>
-              <div className="font-semibold text-right text-blue-400">
+              <div className="text-ink-3">建議買入數量：</div>
+              <div className="font-semibold text-right text-accent">
                 {positionSizeResult.suggestedQuantity.toLocaleString('zh-TW')} {!isUS && formData.unit === 'LOTS' ? '張' : '股'}
               </div>
-              <div className="text-gray-400">實際風險金額：</div>
-              <div className="font-semibold text-right text-gray-200">
+              <div className="text-ink-3">實際風險金額：</div>
+              <div className="font-semibold text-right text-ink">
                 {Math.round(positionSizeResult.actualRiskAmount).toLocaleString('zh-TW')} {priceSuffix}
               </div>
             </div>
           ) : (
-            <p className="text-xs text-gray-500 mb-3">
+            <p className="text-xs text-ink-3 mb-3">
               請輸入停損比例與可承受風險金額，系統將自動試算建議買入數量。
             </p>
           )}
@@ -603,38 +593,38 @@ export default function TradeForm({
             type="button"
             onClick={() => positionSizeResult && handleChange('quantity', String(positionSizeResult.suggestedQuantity))}
             disabled={!positionSizeResult || positionSizeResult.suggestedQuantity <= 0}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-md transition-colors"
+            className="px-4 py-2 bg-accent hover:bg-accent-hover disabled:bg-raised disabled:text-ink-3 text-white text-sm font-medium rounded-lg transition-colors"
           >
             套用建議數量
           </button>
           {positionSizeResult && positionSizeResult.suggestedQuantity <= 0 && (
-            <p className="mt-2 text-xs text-yellow-400">
-              ⚠️ 風險金額不足以買進最小單位，請提高風險金額或調整停損比例
+            <p className="mt-2 text-xs text-warn">
+              風險金額不足以買進最小單位，請提高風險金額或調整停損比例
             </p>
           )}
         </div>
       )}
 
       {/* 標的類型與當沖設定 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-ink-2 mb-2">
             標的類型
           </label>
           <select
             value={formData.securityType}
             onChange={(e) => handleChange('securityType', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100"
+            className="w-full px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink"
           >
             <option value="STOCK">股票</option>
             <option value="ETF">ETF / 指數型</option>
             {!isUS && <option value="TDR">TDR</option>}
             {!isUS && <option value="WARRANT">權證</option>}
           </select>
-          <p className="mt-1 text-xs text-blue-400">
+          <p className="mt-1 text-xs text-accent">
             {isUS
-              ? '💡 美股試算：手續費 0.1%／筆上限 1 美元；賣出另計簡化規費（非台股交易稅）'
-              : '💡 稅率：股票 0.3%（當沖 0.15%）、ETF/TDR/權證 0.1%（賣出時）'}
+              ? '美股試算：手續費 0.1%／筆上限 1 美元；賣出另計簡化規費（非台股交易稅）'
+              : '稅率：股票 0.3%（當沖 0.15%）、ETF/TDR/權證 0.1%（賣出時）'}
           </p>
         </div>
         
@@ -645,9 +635,9 @@ export default function TradeForm({
             type="checkbox"
             checked={formData.isDayTrade}
             onChange={(e) => handleChange('isDayTrade', e.target.checked)}
-            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-600 rounded bg-gray-800"
+            className="h-4 w-4 accent-[#5B8DEF] focus:ring-accent border-line rounded bg-raised"
           />
-          <label htmlFor="isDayTrade" className="text-sm text-gray-300">
+          <label htmlFor="isDayTrade" className="text-sm text-ink-2">
             現股當沖（稅率 0.15%，僅適用股票）
           </label>
         </div>
@@ -657,14 +647,14 @@ export default function TradeForm({
       
       {/* 即時計算預覽 */}
       {preview && (
-        <div className="bg-gray-800 border border-gray-700 rounded-md p-4">
-          <h3 className="font-semibold text-blue-400 mb-3">💰 費用預覽</h3>
+        <div className="bg-raised border border-line-soft rounded-xl p-4">
+          <h3 className="text-[11px] font-bold tracking-[.1em] text-ink-3 mb-3">即時試算</h3>
           <div className="grid grid-cols-2 gap-2 text-sm">
             {/* 股票資訊 */}
             {formData.stockCode.trim() && (
               <>
-                <div className="text-gray-400">股票代號：</div>
-                <div className="font-semibold text-right text-blue-400">
+                <div className="text-ink-3">股票代號：</div>
+                <div className="font-semibold text-right text-accent">
                   {formData.stockCode}
                 </div>
               </>
@@ -672,64 +662,62 @@ export default function TradeForm({
             
             {formData.stockName.trim() && (
               <>
-                <div className="text-gray-400">股票名稱：</div>
-                <div className="font-semibold text-right text-blue-400">
+                <div className="text-ink-3">股票名稱：</div>
+                <div className="font-semibold text-right text-accent">
                   {formData.stockName}
                 </div>
               </>
             )}
             
             {(formData.stockCode.trim() || formData.stockName.trim()) && (
-              <div className="col-span-2 border-t border-gray-600 my-2"></div>
+              <div className="col-span-2 border-t border-line my-2"></div>
             )}
             
-            <div className="text-gray-400">總股數：</div>
-            <div className="font-semibold text-right text-blue-400">
+            <div className="text-ink-3">總股數：</div>
+            <div className="font-semibold text-right text-accent">
               {preview.totalShares.toLocaleString('zh-TW')} 股
               {!isUS && formData.unit === 'LOTS' && ` (${formData.quantity} 張)`}
             </div>
             
-            <div className="text-gray-400">成交金額：</div>
-            <div className="font-semibold text-right text-gray-200">
+            <div className="text-ink-3">成交金額：</div>
+            <div className="font-semibold text-right text-ink">
               {preview.amount.toLocaleString('zh-TW')} {priceSuffix}
             </div>
             
-            <div className="text-gray-400">{isUS ? '手續費（0.1%·上限 1 美元）：' : '手續費（六折）：'}</div>
-            <div className="font-semibold text-right text-orange-400">
+            <div className="text-ink-3">{isUS ? '手續費（0.1%·上限 1 美元）：' : '手續費（六折）：'}</div>
+            <div className="font-semibold text-right text-warn">
               {preview.commission.toLocaleString('zh-TW')} {priceSuffix}
             </div>
             
             {formData.tradeType === 'SELL' && (
               <>
-                <div className="text-gray-400">{isUS ? '賣出規費（簡化）：' : '交易稅：'}</div>
-                <div className="font-semibold text-right text-orange-400">
+                <div className="text-ink-3">{isUS ? '賣出規費（簡化）：' : '交易稅：'}</div>
+                <div className="font-semibold text-right text-warn">
                   {preview.tax.toLocaleString('zh-TW')} {priceSuffix}
                 </div>
               </>
             )}
             
-            <div className="col-span-2 border-t border-gray-600 my-2"></div>
+            <div className="col-span-2 border-t border-line my-2"></div>
             
-            <div className="text-gray-200 font-semibold">
+            <div className="text-ink font-semibold">
               {formData.tradeType === 'BUY' ? '總成本：' : '淨收入：'}
             </div>
-            <div className={`font-bold text-right text-lg ${
-              formData.tradeType === 'BUY' ? 'text-green-400' : 'text-red-400'
-            }`}>
+            <div className="font-bold text-right text-lg text-ink">
               {preview.totalCost.toLocaleString('zh-TW')} {priceSuffix}
             </div>
             
             {formData.tradeType === 'BUY' && formData.stopLossPrice && preview && (
               <>
-                <div className="col-span-2 border-t border-gray-600 my-2"></div>
+                <div className="col-span-2 border-t border-line my-2"></div>
                 
-                <div className="text-gray-400">停損價（自動）：</div>
+                <div className="text-ink-3">停損價（自動）：</div>
                 <div className="font-semibold text-right text-red-400">
                   {parseFloat(formData.stopLossPrice).toLocaleString('zh-TW')} {priceSuffix}
                 </div>
                 
-                <div className="text-gray-400">預計停損損失：</div>
-                <div className="font-semibold text-right text-orange-400">
+                <div className="text-ink-3">預計停損損失：</div>
+                <div className="font-semibold text-right text-warn">
                   {parseFloat(formData.plannedStopLoss || '0').toLocaleString('zh-TW')} {priceSuffix}（約當 {(DEFAULT_STOP_LOSS_PERCENT * 100).toFixed(0)}%）
                 </div>
               </>
@@ -743,10 +731,10 @@ export default function TradeForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className={`flex-1 py-3 px-4 rounded-md font-semibold text-white transition-colors ${
+          className={`flex-1 py-3 px-4 rounded-lg font-semibold text-white transition-colors ${
             isSubmitting
-              ? 'bg-gray-600 cursor-not-allowed'
-              : 'bg-blue-600 hover:bg-blue-500 active:bg-blue-700'
+              ? 'bg-raised text-ink-3 cursor-not-allowed'
+              : 'bg-accent hover:bg-accent-hover'
           }`}
         >
           {isSubmitting ? '提交中...' : submitLabel}
@@ -757,20 +745,20 @@ export default function TradeForm({
             type="button"
             onClick={onCancel}
             disabled={isSubmitting}
-            className="px-6 py-3 border border-gray-600 rounded-md font-semibold text-gray-300 hover:bg-gray-800 transition-colors"
+            className="px-6 py-3 border border-line rounded-lg font-semibold text-ink-2 hover:bg-raised hover:text-ink transition-colors"
           >
             取消
           </button>
         )}
       </div>
       
-      <p className="text-xs text-gray-500 text-center">
+      <p className="text-xs text-ink-3 text-center">
         {isUS ? (
           <>* 美股金額以美元計；手續費試算為 0.1%、每筆最高 1 美元。帳戶餘額僅反映台股，美股不併入同一餘額。</>
         ) : (
           <>
         * 為必填欄位。手續費與交易稅將自動計算（手續費六折，賣出時收取 0.3% 交易稅）<br />
-        💡 換算：1 張 = 1000 股｜1 股 = 0.001 張
+        換算：1 張 = 1000 股｜1 股 = 0.001 張
           </>
         )}
       </p>

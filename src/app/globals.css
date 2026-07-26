@@ -2,13 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 全域樣式 - 深色主題 */
+/* 全域樣式 - 深色交易終端主題（藍調中性色盤） */
 :root {
-  --foreground: #e5e5e5;
-  --background: #0f0f0f;
-  --card-bg: #1a1a1a;
-  --card-border: #2a2a2a;
-  --hover-bg: #252525;
+  --foreground: #E9EDF5;
+  --background: #0B0E14;
+  --card-bg: #121722;
+  --card-border: #232C3D;
+  --hover-bg: #1A2130;
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
@@ -16,6 +20,7 @@ body {
   background: var(--background);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     'Helvetica Neue', Arial, 'Noto Sans TC', sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* 自定義捲軸樣式 - 深色 */
@@ -25,16 +30,23 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: #121722;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #444;
+  background: #33405A;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #405070;
+}
+
+/* 鍵盤焦點一致可見 */
+:focus-visible {
+  outline: 2px solid #5B8DEF;
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 /* 彈窗進場動畫（尊重 reduce-motion） */
@@ -48,55 +60,70 @@ body {
 }
 .modal-overlay-in { animation: modalOverlayIn 0.18s ease-out both; }
 .modal-panel-in { animation: modalPanelIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* 右側抽屜（新增/編輯交易） */
+@keyframes drawerIn {
+  from { transform: translateX(105%); }
+  to { transform: translateX(0); }
+}
+.drawer-panel-in { animation: drawerIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+
+/* 固定 Toast */
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-in { animation: toastIn 0.22s ease-out both; }
+
 @media (prefers-reduced-motion: reduce) {
-  .modal-overlay-in, .modal-panel-in { animation: none; }
+  .modal-overlay-in, .modal-panel-in, .drawer-panel-in, .toast-in { animation: none; }
 }
 
 /* 輔助類別 */
 @layer components {
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition-colors;
+    @apply bg-accent hover:bg-accent-hover text-white font-semibold py-2 px-4 rounded-lg transition-colors;
   }
 
   .btn-secondary {
-    @apply bg-gray-700 hover:bg-gray-600 text-gray-200 font-semibold py-2 px-4 rounded-md transition-colors;
+    @apply bg-raised hover:bg-overlay text-ink-2 hover:text-ink font-semibold py-2 px-4 rounded-lg border border-line transition-colors;
   }
 
   .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-md transition-colors;
+    @apply bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors;
   }
 
   .input-field {
-    @apply w-full px-3 py-2 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-gray-100;
+    @apply w-full px-3 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-accent bg-raised text-ink;
   }
-  
+
   /* 深色模式輸入框樣式 */
   input[type="text"],
   input[type="number"],
   input[type="date"],
   select {
-    @apply bg-gray-800 text-gray-100 border-gray-600;
+    @apply bg-raised text-ink border-line;
     color-scheme: dark;
   }
-  
+
   input::placeholder {
-    @apply text-gray-500;
+    @apply text-ink-3;
   }
 
   .card {
-    @apply bg-gray-900 rounded-lg shadow-md p-6 border border-gray-800;
+    @apply bg-surface rounded-2xl shadow-md p-6 border border-line;
   }
 
   .stat-card {
-    @apply bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-4 border border-gray-700;
+    @apply bg-raised rounded-xl p-4 border border-line;
   }
 
+  /* 台股慣例：漲紅跌綠 */
   .positive {
-    @apply text-green-500 font-semibold;
+    @apply text-up font-semibold;
   }
 
   .negative {
-    @apply text-red-500 font-semibold;
+    @apply text-down font-semibold;
   }
 }
-

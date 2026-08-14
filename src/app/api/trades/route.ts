@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { calculateTrade } from '@/lib/tradeCalculations';
 import { validateTradeForm } from '@/lib/formValidation';
+import { analyzeClosedPosition } from '@/lib/setupAnalysis';
 
 // 強制動態渲染，禁止快取
 export const dynamic = 'force-dynamic';
@@ -342,6 +343,24 @@ async function updatePositionFromTrades(positionId: string) {
     ? totalPnL / plannedStopLoss
     : null;
 
+  // 平倉後自動分析（best-effort）：僅在剛平倉、且備註／訊號標籤仍有欄位空白時才嘗試；
+  // 依進場當下的歷史股價回溯技術指標分類，失敗（抓不到歷史資料等）就略過，不影響交易寫入。
+  // 欄位級只補空白、不覆蓋使用者已填寫的內容。
+  let autoAnalysis: Awaited<ReturnType<typeof analyzeClosedPosition>> = null;
+  const firstBuy = buyTrades[0];
+  if (isClosed && position && (!position.notes || !position.setupType) && firstBuy && avgExitPrice !== null && exitDate) {
+    autoAnalysis = await analyzeClosedPosition({
+      stockCode: position.stockCode,
+      market: m === 'US' ? 'US' : 'TW',
+      entryDate: new Date(firstBuy.tradeDate),
+      entryPrice: firstBuy.price,
+      exitDate: new Date(exitDate),
+      exitPrice: avgExitPrice,
+      holdingDays,
+      returnRate,
+    });
+  }
+
   // 更新部位
   await prisma.position.update({
     where: { id: positionId },
@@ -358,6 +377,16 @@ async function updatePositionFromTrades(positionId: string) {
       returnRate,
       holdingDays,
       rValue,
+      ...(autoAnalysis && !position?.setupType ? { setupType: autoAnalysis.setupType } : {}),
+      ...(autoAnalysis && !position?.notes ? { notes: autoAnalysis.notes } : {}),
+      ...(autoAnalysis && position?.rsAtEntry == null ? { rsAtEntry: autoAnalysis.rsAtEntry } : {}),
+      ...(autoAnalysis && position?.trendAtEntry == null ? { trendAtEntry: autoAnalysis.trendAtEntry } : {}),
+      ...(autoAnalysis && position?.pctFrom52wHighAtEntry == null
+        ? { pctFrom52wHighAtEntry: autoAnalysis.pctFrom52wHighAtEntry }
+        : {}),
+      ...(autoAnalysis && position?.volRatioAtEntry == null
+        ? { volRatioAtEntry: autoAnalysis.volRatioAtEntry }
+        : {}),
     },
   });
 }

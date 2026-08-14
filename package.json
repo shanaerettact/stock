@@ -21,6 +21,7 @@
     "db:recalc-positions": "tsx prisma/init-account.ts --recalc-positions",
     "db:prune-us-inventory": "tsx prisma/init-account.ts --prune-us-inventory",
     "db:update-capital": "tsx prisma/update-capital.ts",
+    "db:backfill-setup-analysis": "tsx scripts/backfill-setup-analysis.ts",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf .next node_modules/.cache",
     "stocks:import": "tsx scripts/import-stocks.ts",

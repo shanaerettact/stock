@@ -10,7 +10,17 @@
       "Bash(echo \"EXIT:$?\")",
       "Skill(artifact-design)",
       "Artifact",
-      "Bash(npx prisma *)"
+      "Bash(npx prisma *)",
+      "Bash(lsof -iTCP:3002 -sTCP:LISTEN -n -P)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3002/api/account)",
+      "Bash(sqlite3 *)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"http://localhost:3002/api/account\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(xargs -I{} echo {})",
+      "Bash(curl *)",
+      "WebSearch",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

@@ -164,15 +164,23 @@ function EntrySnapshot({ position }: { position: Position }) {
         </span>
       )}
       {rsAtEntry != null && (
-        <span className={`${chip} ${rsAtEntry >= 0 ? 'bg-red-900/30 text-red-300' : 'bg-green-900/30 text-green-300'}`}>
-          RS {rsAtEntry >= 0 ? '+' : ''}{rsAtEntry.toFixed(1)}%
+        <span
+          className={`${chip} ${rsAtEntry >= 0 ? 'bg-red-900/30 text-red-300' : 'bg-green-900/30 text-green-300'}`}
+          title="相對強度（RS）：近 60 個交易日個股報酬率減去大盤報酬率，正值代表這段期間漲得比大盤兇，負值代表輸給大盤"
+        >
+          強弱勢 {rsAtEntry >= 0 ? '+' : ''}{rsAtEntry.toFixed(1)}%（{rsAtEntry >= 0 ? '強於大盤' : '弱於大盤'}）
         </span>
       )}
       {pctFrom52wHighAtEntry != null && (
         <span className={`${chip} bg-gray-800 text-gray-300`}>距52週高 {pctFrom52wHighAtEntry >= 0 ? '+' : ''}{pctFrom52wHighAtEntry.toFixed(1)}%</span>
       )}
       {volRatioAtEntry != null && (
-        <span className={`${chip} bg-gray-800 text-gray-300`}>量比 {volRatioAtEntry.toFixed(2)}x</span>
+        <span
+          className={`${chip} bg-gray-800 text-gray-300`}
+          title="量比：進場當天成交量 ÷ 近 50 個交易日平均成交量，數字越大代表當天量能放得越大"
+        >
+          成交量 {volRatioAtEntry.toFixed(2)} 倍均量（{volRatioAtEntry >= 1.5 ? '爆量' : volRatioAtEntry >= 1 ? '放量' : '量縮'}）
+        </span>
       )}
     </div>
   );
